@@ -37,3 +37,4 @@ make test
 ```
 
 `scripts/deploy.sh`, `scripts/smoke-test.sh`, `scripts/rollback.sh`, `scripts/publish.sh` y `scripts/promote.sh` se pueden ejecutar localmente con las variables de entorno documentadas en `docs/runbook.md`, siempre y cuando se tengan credenciales AWS/JFrog válidas — en la práctica solo el pipeline los invoca.
+
