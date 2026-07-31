@@ -1,0 +1,21 @@
+{
+  "name": "daviplata-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sitio estático de referencia para la prueba técnica DevSecOps.",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "lint:html": "html-validate \"src/**/*.html\"",
+    "lint:css": "stylelint \"src/**/*.css\"",
+    "lint": "npm run lint:html && npm run lint:css",
+    "test:links": "node tests/check-links.js",
+    "test:lhci": "lhci autorun",
+    "test": "npm run test:links"
+  },
+  "devDependencies": {
+    "html-validate": "^8.18.1",
+    "stylelint": "^16.6.1",
+    "stylelint-config-standard": "^36.0.1",
+    "@lhci/cli": "^0.14.0"
+  }
+}

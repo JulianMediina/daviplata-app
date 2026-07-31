@@ -1,0 +1,54 @@
+name: pr-validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  branch-name:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validar convención de nombre de rama
+        run: |
+          branch="${{ github.head_ref }}"
+          if [[ ! "$branch" =~ ^(feature|fix|release)/.+ ]]; then
+            echo "Rama '$branch' no cumple la convención feature/*, fix/* o release/*." >&2
+            exit 1
+          fi
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: branch-name
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - name: build (bundle de referencia para tests)
+        run: npm run build
+        env:
+          BUILD_ENVIRONMENT: integracion
+          BUILD_VERSION: pr-${{ github.event.pull_request.number }}
+          BUILD_COMMIT: ${{ github.event.pull_request.head.sha }}
+
+      - run: npm run test:links
+
+      - run: npm run test:lhci
+        continue-on-error: false
+
+  security:
+    needs: build-and-test
+    uses: ./.github/workflows/reusable-security.yml
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

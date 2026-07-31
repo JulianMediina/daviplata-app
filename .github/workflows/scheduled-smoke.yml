@@ -1,0 +1,37 @@
+name: scheduled-smoke
+
+on:
+  schedule:
+    - cron: "*/30 * * * *" # cada 30 minutos
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [integracion, laboratorio, produccion]
+    runs-on: ubuntu-latest
+    environment: ${{ matrix.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: smoke test (canario de bajo costo)
+        run: scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
+
+      - name: abrir incidencia si el ambiente no responde
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Smoke programado falló en ${{ matrix.environment }}`,
+              labels: ["incident", "${{ matrix.environment }}"],
+              body: "El smoke test programado no pudo validar / , /health.json o /version.json. Revisar el dashboard de CloudWatch y el log de este workflow.",
+            });

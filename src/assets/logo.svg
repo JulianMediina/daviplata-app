@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-labelledby="logoTitle">
+  <title id="logoTitle">DaviPlata</title>
+  <circle cx="24" cy="24" r="24" fill="#b8121f" />
+  <path d="M15 32V16h9.5c4.7 0 8 3.2 8 8s-3.3 8-8 8H15zm5-4.6h4.2c2.2 0 3.6-1.4 3.6-3.4s-1.4-3.4-3.6-3.4H20v6.8z" fill="#ffffff" />
+</svg>

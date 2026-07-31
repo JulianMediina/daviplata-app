@@ -1,0 +1,7 @@
+{
+  "environment": "produccion",
+  "displayName": "Producción",
+  "featureFlags": {
+    "showEnvironmentBanner": false
+  }
+}

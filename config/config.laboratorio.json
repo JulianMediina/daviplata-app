@@ -1,0 +1,7 @@
+{
+  "environment": "laboratorio",
+  "displayName": "Laboratorio",
+  "featureFlags": {
+    "showEnvironmentBanner": true
+  }
+}

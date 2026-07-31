@@ -1,0 +1,256 @@
+name: release-deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  JFROG_URL: ${{ secrets.JFROG_URL }}
+  JFROG_USER: ${{ secrets.JFROG_USER }}
+  JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+  JFROG_REPO_INTEGRACION: daviplata-integracion
+  JFROG_REPO_LABORATORIO: daviplata-laboratorio
+  JFROG_REPO_PRODUCCION: daviplata-produccion
+
+jobs:
+  build-publish:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: build (bundle inmutable por SHA)
+        run: npm run build
+        env:
+          BUILD_ENVIRONMENT: integracion
+          BUILD_VERSION: ${{ github.sha }}
+          BUILD_COMMIT: ${{ github.sha }}
+
+      - name: publicar en JFrog Artifactory (repo integración)
+        env:
+          JFROG_REPO: ${{ env.JFROG_REPO_INTEGRACION }}
+        run: scripts/publish.sh "${{ github.sha }}"
+
+      - name: SCA con Trivy
+        run: |
+          mkdir -p /tmp/trivy-scan
+          tar -xzf "site-${{ github.sha }}.tar.gz" -C /tmp/trivy-scan
+          docker run --rm -v /tmp/trivy-scan:/scan aquasec/trivy fs /scan \
+            --severity CRITICAL,HIGH --exit-code 1 --no-progress
+
+  deploy-integracion:
+    runs-on: ubuntu-latest
+    needs: build-publish
+    environment: integracion
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: descargar artefacto publicado
+        env:
+          JFROG_URL: ${{ secrets.JFROG_URL }}
+          JFROG_USER: ${{ secrets.JFROG_USER }}
+          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+        run: |
+          curl --fail --silent --show-error -u "${JFROG_USER}:${JFROG_TOKEN}" \
+            -o "site-${{ github.sha }}.tar.gz" \
+            "${JFROG_URL}/${{ env.JFROG_REPO_INTEGRACION }}/site-${{ github.sha }}.tar.gz"
+          mkdir -p dist
+          tar -xzf "site-${{ github.sha }}.tar.gz" -C dist
+
+      - name: desplegar
+        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}"
+
+      - name: smoke test
+        id: smoke
+        run: scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}" "${{ github.sha }}"
+
+      - name: marcar como estable
+        if: success()
+        run: scripts/mark-stable.sh "${{ vars.SITE_BUCKET }}" "${{ github.sha }}"
+
+      - name: rollback automático
+        if: failure() && steps.smoke.outcome == 'failure'
+        env:
+          JFROG_URL: ${{ secrets.JFROG_URL }}
+          JFROG_USER: ${{ secrets.JFROG_USER }}
+          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+          JFROG_REPO: ${{ env.JFROG_REPO_INTEGRACION }}
+        run: |
+          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}"
+          scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
+
+      - name: subir evidencia de incidente
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-incidente-integracion-${{ github.sha }}
+          path: docs/evidence/rollback/*.log
+          if-no-files-found: warn
+
+  promote-laboratorio:
+    runs-on: ubuntu-latest
+    needs: deploy-integracion
+    steps:
+      - uses: actions/checkout@v4
+      - name: promover artefacto integración -> laboratorio
+        env:
+          JFROG_URL: ${{ secrets.JFROG_URL }}
+          JFROG_USER: ${{ secrets.JFROG_USER }}
+          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+        run: scripts/promote.sh "${{ github.sha }}" "${{ env.JFROG_REPO_INTEGRACION }}" "${{ env.JFROG_REPO_LABORATORIO }}"
+
+  deploy-laboratorio:
+    runs-on: ubuntu-latest
+    needs: promote-laboratorio
+    environment: laboratorio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: descargar artefacto promovido
+        env:
+          JFROG_URL: ${{ secrets.JFROG_URL }}
+          JFROG_USER: ${{ secrets.JFROG_USER }}
+          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+        run: |
+          curl --fail --silent --show-error -u "${JFROG_USER}:${JFROG_TOKEN}" \
+            -o "site-${{ github.sha }}.tar.gz" \
+            "${JFROG_URL}/${{ env.JFROG_REPO_LABORATORIO }}/site-${{ github.sha }}.tar.gz"
+          mkdir -p dist
+          tar -xzf "site-${{ github.sha }}.tar.gz" -C dist
+
+      - name: desplegar
+        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}"
+
+      - name: smoke test
+        id: smoke
+        run: scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}" "${{ github.sha }}"
+
+      - name: marcar como estable
+        if: success()
+        run: scripts/mark-stable.sh "${{ vars.SITE_BUCKET }}" "${{ github.sha }}"
+
+      - name: rollback automático
+        if: failure() && steps.smoke.outcome == 'failure'
+        env:
+          JFROG_URL: ${{ secrets.JFROG_URL }}
+          JFROG_USER: ${{ secrets.JFROG_USER }}
+          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+          JFROG_REPO: ${{ env.JFROG_REPO_LABORATORIO }}
+        run: |
+          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}"
+          scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
+
+      - name: subir evidencia de incidente
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-incidente-laboratorio-${{ github.sha }}
+          path: docs/evidence/rollback/*.log
+          if-no-files-found: warn
+
+  # producción requiere aprobación de 2 revisores, configurada en
+  # Settings > Environments > produccion (cuatro ojos).
+  promote-produccion:
+    runs-on: ubuntu-latest
+    needs: deploy-laboratorio
+    environment: produccion
+    steps:
+      - uses: actions/checkout@v4
+      - name: promover artefacto laboratorio -> producción
+        env:
+          JFROG_URL: ${{ secrets.JFROG_URL }}
+          JFROG_USER: ${{ secrets.JFROG_USER }}
+          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+        run: scripts/promote.sh "${{ github.sha }}" "${{ env.JFROG_REPO_LABORATORIO }}" "${{ env.JFROG_REPO_PRODUCCION }}"
+
+  deploy-produccion:
+    runs-on: ubuntu-latest
+    needs: promote-produccion
+    environment: produccion
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: descargar artefacto promovido
+        env:
+          JFROG_URL: ${{ secrets.JFROG_URL }}
+          JFROG_USER: ${{ secrets.JFROG_USER }}
+          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+        run: |
+          curl --fail --silent --show-error -u "${JFROG_USER}:${JFROG_TOKEN}" \
+            -o "site-${{ github.sha }}.tar.gz" \
+            "${JFROG_URL}/${{ env.JFROG_REPO_PRODUCCION }}/site-${{ github.sha }}.tar.gz"
+          mkdir -p dist
+          tar -xzf "site-${{ github.sha }}.tar.gz" -C dist
+
+      - name: desplegar
+        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}"
+
+      - name: smoke test
+        id: smoke
+        run: scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}" "${{ github.sha }}"
+
+      - name: marcar como estable
+        if: success()
+        run: scripts/mark-stable.sh "${{ vars.SITE_BUCKET }}" "${{ github.sha }}"
+
+      - name: rollback automático
+        if: failure() && steps.smoke.outcome == 'failure'
+        env:
+          JFROG_URL: ${{ secrets.JFROG_URL }}
+          JFROG_USER: ${{ secrets.JFROG_USER }}
+          JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+          JFROG_REPO: ${{ env.JFROG_REPO_PRODUCCION }}
+        run: |
+          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}"
+          scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
+
+      - name: subir evidencia de incidente
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-incidente-produccion-${{ github.sha }}
+          path: docs/evidence/rollback/*.log
+          if-no-files-found: warn
+
+  notify:
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [deploy-integracion, deploy-laboratorio, deploy-produccion]
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - name: Notificar resultado
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "release-deploy ${{ github.sha }}: integracion=${{ needs.deploy-integracion.result }} laboratorio=${{ needs.deploy-laboratorio.result }} produccion=${{ needs.deploy-produccion.result }}"
+            }
