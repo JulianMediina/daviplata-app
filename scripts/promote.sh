@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
-# Copia el mismo artefacto (identificado por SHA) entre repositorios de
-# ambiente en JFrog Artifactory, sin reconstruirlo.
-# Requiere JFROG_URL, JFROG_USER, JFROG_TOKEN en el entorno.
-# Uso: promote.sh <commit_sha> <repo_origen> <repo_destino>
+# Marca en las notas del release que el artefacto avanzó a un ambiente.
+# A diferencia de un registro con repos por ambiente, un GitHub Release es
+# una sola ubicación global — "promover" no mueve ni copia el archivo
+# (nunca se reconstruye), solo deja el rastro de auditoría de por dónde
+# ha pasado.
+# Uso: promote.sh <commit_sha> <repo owner/name> <ambiente_destino>
 set -euo pipefail
 
 COMMIT_SHA="${1:?falta el commit SHA}"
-FROM_REPO="${2:?falta el repositorio de origen}"
-TO_REPO="${3:?falta el repositorio de destino}"
-: "${JFROG_URL:?falta JFROG_URL}"
-: "${JFROG_USER:?falta JFROG_USER}"
-: "${JFROG_TOKEN:?falta JFROG_TOKEN}"
+REPO="${2:?falta el repo (owner/name)}"
+TO_ENV="${3:?falta el ambiente destino}"
+TAG="build-${COMMIT_SHA}"
+TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-ARTIFACT_NAME="site-${COMMIT_SHA}.tar.gz"
+CURRENT_NOTES="$(gh release view "${TAG}" --repo "${REPO}" --json body -q .body)"
 
-echo "==> Promoviendo ${ARTIFACT_NAME}: ${FROM_REPO} -> ${TO_REPO}"
-curl --fail --silent --show-error -X POST \
-  -u "${JFROG_USER}:${JFROG_TOKEN}" \
-  "${JFROG_URL}/api/copy/${FROM_REPO}/${ARTIFACT_NAME}?to=/${TO_REPO}/${ARTIFACT_NAME}"
+echo "==> Marcando ${TAG} como promovido a ${TO_ENV}"
+gh release edit "${TAG}" --repo "${REPO}" \
+  --notes "${CURRENT_NOTES}
+- Promovido a ${TO_ENV} (${TIMESTAMP})"
 
-echo "==> Promoción completada"
+echo "==> Promoción registrada"

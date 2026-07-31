@@ -4,7 +4,7 @@ No hay clúster ni controlador de reconciliación en este proyecto, así que "Gi
 
 ## 1. Git como única fuente de verdad
 
-Ningún cambio de infraestructura o de la app llega a AWS sin pasar antes por un commit en `main`. No existe un `terraform apply` ni un `aws s3 sync` documentado como paso manual desde una laptop fuera de `terraform-foundation/bootstrap` (que es, por diseño, la única excepción — ver su README).
+Ningún cambio de infraestructura o de la app llega a AWS sin pasar antes por un commit en `main`. No existe un `terraform apply` ni un `aws s3 sync` documentado como paso manual desde una laptop — ni siquiera `terraform-foundation`, que tiene su propio `foundation-plan.yml`/`foundation-apply.yml` (ver su README para cómo resuelve la dependencia circular de su propio backend de estado).
 
 ## 2. Cambios declarativos, revisados antes de aplicarse
 
@@ -18,8 +18,8 @@ Ningún cambio de infraestructura o de la app llega a AWS sin pasar antes por un
 
 ## 4. Promoción sin reconstrucción
 
-El artefacto de `daviplata-app` se construye **una sola vez** por commit y se promueve por SHA entre repositorios de JFrog Artifactory (`daviplata-integracion` → `daviplata-laboratorio` → `daviplata-produccion`). Lo que se prueba en integración es, en bytes, lo que llega a producción — la promoción es una operación de copia, no un nuevo build.
+El artefacto de `daviplata-app` se construye **una sola vez** por commit y se publica como un GitHub Release (`build-<SHA>`). "Promover" a laboratorio o producción no mueve ni copia el archivo — es el mismo asset, descargado tal cual en cada ambiente; `scripts/promote.sh` solo añade una línea a las notas del release marcando por qué ambientes ya pasó, para trazabilidad. Lo que se prueba en integración es, en bytes, lo que llega a producción.
 
 ## Control de cambios
 
-Branch protection en `main` de los 4 repos + revisión obligatoria por PR es el mecanismo de "cuatro ojos" para infraestructura y aplicación en general; producción, además, exige aprobación explícita en su GitHub Environment antes de que `promote-produccion`/`apply-produccion` corran. El historial de Git (quién y cuándo aprobó cada PR) más el historial de promociones en JFrog son, juntos, el registro de auditoría de la plataforma.
+Branch protection en `main` de los 4 repos + revisión obligatoria por PR es el mecanismo de "cuatro ojos" para infraestructura y aplicación en general; producción, además, exige aprobación explícita en su GitHub Environment antes de que `promote-produccion`/`apply-produccion` corran. El historial de Git (quién y cuándo aprobó cada PR) más las notas de cada GitHub Release son, juntos, el registro de auditoría de la plataforma.

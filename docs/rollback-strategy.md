@@ -5,7 +5,7 @@
 Cada ambiente mantiene un puntero de "última versión estable" en `s3://<bucket>/_meta/stable.txt`, actualizado por `scripts/mark-stable.sh` **solo** después de que el smoke test de un despliegue pase. Si el smoke test de un despliegue nuevo falla, `scripts/rollback.sh`:
 
 1. Lee `_meta/stable.txt` para saber cuál fue el último commit que sí pasó.
-2. Descarga ese bundle (`site-<SHA>.tar.gz`) desde JFrog Artifactory — el mismo artefacto inmutable que ya se había probado, no una reconstrucción.
+2. Descarga ese bundle (`site-<SHA>.tar.gz`) del GitHub Release `build-<SHA>` — el mismo artefacto inmutable que ya se había probado, no una reconstrucción.
 3. Sincroniza ese bundle al bucket del ambiente (`aws s3 sync --delete`, preservando `_meta/`).
 4. Invalida la caché de CloudFront.
 5. Vuelve a correr el smoke test para confirmar que el rollback dejó el ambiente sano (validación post-rollback).
@@ -15,7 +15,7 @@ En el pipeline (`release-deploy.yml`), este flujo se dispara automáticamente: e
 
 ## Por qué un puntero en S3 y no versionado objeto-por-objeto
 
-El bucket sí tiene versionado de S3 habilitado (además, como red de seguridad), pero restaurar "la versión anterior" objeto por objeto es ambiguo cuando un despliegue toca varios archivos a la vez: no hay garantía de que la versión N-1 de cada objeto individual corresponda al mismo despliegue coherente. Usar el bundle completo por SHA desde JFrog garantiza que el rollback siempre restaura un conjunto de archivos que ya pasó smoke test como unidad.
+El bucket sí tiene versionado de S3 habilitado (además, como red de seguridad), pero restaurar "la versión anterior" objeto por objeto es ambiguo cuando un despliegue toca varios archivos a la vez: no hay garantía de que la versión N-1 de cada objeto individual corresponda al mismo despliegue coherente. Usar el bundle completo por SHA desde el GitHub Release garantiza que el rollback siempre restaura un conjunto de archivos que ya pasó smoke test como unidad.
 
 ## Restauración de configuración
 

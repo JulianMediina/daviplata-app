@@ -11,7 +11,7 @@ build:
 	npm run build
 
 publish:
-	scripts/publish.sh $(SHA)
+	scripts/publish.sh $(SHA) $(REPO)
 
 deploy:
 	scripts/deploy.sh $(BUCKET) $(DISTRIBUTION_ID)
@@ -20,7 +20,7 @@ smoke:
 	scripts/smoke-test.sh $(URL) $(SHA)
 
 promote:
-	scripts/promote.sh $(SHA) $(FROM) $(TO)
+	scripts/promote.sh $(SHA) $(REPO) $(TO)
 
 rollback:
-	scripts/rollback.sh $(BUCKET) $(DISTRIBUTION_ID)
+	scripts/rollback.sh $(BUCKET) $(DISTRIBUTION_ID) $(REPO)

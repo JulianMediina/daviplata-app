@@ -18,7 +18,7 @@ El riesgo más común es dos personas (o dos pipelines) aplicando al mismo estad
 
 ## 5. ¿Cómo gestionarías secretos de forma segura en todo el ciclo?
 
-Cero secretos estáticos donde se pueda evitar: por eso todo el acceso de GitHub Actions a AWS es vía OIDC (`sts:AssumeRoleWithWebIdentity`), no access keys guardadas en secrets. Lo que sí necesita guardarse como secreto (tokens de SonarQube, JFrog) vive en GitHub Secrets a nivel de repo o de environment, nunca en el código ni en `.tfvars` versionados. En Terraform, cualquier valor sensible que un módulo necesite pasar entre sí se marca `sensitive = true` para que no aparezca en logs de plan/apply. Y hay una segunda capa de defensa activa (Gitleaks + el detector de secretos de Sonar) que bloquea el PR si algo sensible se cuela en un commit, en vez de confiar solo en que nadie cometa el error.
+Cero secretos estáticos donde se pueda evitar: por eso todo el acceso de GitHub Actions a AWS es vía OIDC (`sts:AssumeRoleWithWebIdentity`), no access keys guardadas en secrets — con una única excepción documentada: el pipeline de `terraform-foundation` no puede usar OIDC porque es el que crea el proveedor OIDC del que dependen los demás, así que usa una credencial IAM de larga duración guardada como secret solo de ese repositorio. Lo que sí necesita guardarse como secreto (el token de SonarQube) vive en GitHub Secrets a nivel de repo o de environment, nunca en el código ni en `.tfvars` versionados. En Terraform, cualquier valor sensible que un módulo necesite pasar entre sí se marca `sensitive = true` para que no aparezca en logs de plan/apply. Y hay una segunda capa de defensa activa (Gitleaks + el detector de secretos de Sonar) que bloquea el PR si algo sensible se cuela en un commit, en vez de confiar solo en que nadie cometa el error.
 
 ## 6. ¿Qué necesitarías para tener observabilidad completa?
 
@@ -26,7 +26,7 @@ Lo que hay en este proyecto (métricas de CloudFront, alarmas, dashboard, smoke 
 
 ## 7. ¿Cómo garantizarías trazabilidad commit → pipeline → artefacto → despliegue?
 
-Con la cadena que implementé: cada commit a `main` genera un único artefacto (`site-<SHA>.tar.gz`), publicado en JFrog bajo ese mismo SHA, y ese SHA queda embebido en `version.json` en cada ambiente donde se despliega. El smoke test compara `version.json.commit` contra el SHA esperado antes de dar el despliegue por bueno, así que la trazabilidad no es solo documental: es una condición que el pipeline verifica activamente. Para llevarlo más lejos —relevante en un contexto bancario real— agregaría un SBOM (Syft) por artefacto y adoptaría un esquema de procedencia tipo SLSA, para poder demostrar no solo "qué commit es" sino "cómo se construyó y quién lo construyó".
+Con la cadena que implementé: cada commit a `main` genera un único artefacto (`site-<SHA>.tar.gz`), publicado como GitHub Release bajo ese mismo SHA, y ese SHA queda embebido en `version.json` en cada ambiente donde se despliega. El smoke test compara `version.json.commit` contra el SHA esperado antes de dar el despliegue por bueno, así que la trazabilidad no es solo documental: es una condición que el pipeline verifica activamente. Para llevarlo más lejos —relevante en un contexto bancario real— agregaría un SBOM (Syft) por artefacto y adoptaría un esquema de procedencia tipo SLSA, para poder demostrar no solo "qué commit es" sino "cómo se construyó y quién lo construyó".
 
 ## 8. ¿Cómo validarías imágenes Docker antes de desplegarlas? (aunque aquí no se usan contenedores)
 

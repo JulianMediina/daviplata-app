@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 # Restaura la última versión estable conocida: descarga el bundle marcado
-# como estable desde JFrog y lo vuelve a sincronizar al bucket del ambiente.
-# Requiere JFROG_URL, JFROG_USER, JFROG_TOKEN, JFROG_REPO en el entorno.
-# Uso: rollback.sh <bucket> <distribution_id>
+# como estable desde el GitHub Release correspondiente y lo vuelve a
+# sincronizar al bucket del ambiente.
+# Uso: rollback.sh <bucket> <distribution_id> <repo owner/name>
 set -euo pipefail
 
 BUCKET="${1:?falta el nombre del bucket}"
 DISTRIBUTION_ID="${2:?falta el distribution id de CloudFront}"
-: "${JFROG_URL:?falta JFROG_URL}"
-: "${JFROG_USER:?falta JFROG_USER}"
-: "${JFROG_TOKEN:?falta JFROG_TOKEN}"
-: "${JFROG_REPO:?falta JFROG_REPO}"
+REPO="${3:?falta el repo (owner/name)}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK_DIR="$(mktemp -d)"
@@ -25,16 +22,13 @@ if [[ -z "${STABLE_SHA}" ]]; then
 fi
 
 echo "==> Última versión estable: ${STABLE_SHA}"
-ARTIFACT_NAME="site-${STABLE_SHA}.tar.gz"
+TAG="build-${STABLE_SHA}"
 
-echo "==> Descargando ${ARTIFACT_NAME} desde JFrog"
-curl --fail --silent --show-error \
-  -u "${JFROG_USER}:${JFROG_TOKEN}" \
-  -o "${WORK_DIR}/${ARTIFACT_NAME}" \
-  "${JFROG_URL}/${JFROG_REPO}/${ARTIFACT_NAME}"
+echo "==> Descargando release ${TAG} de ${REPO}"
+gh release download "${TAG}" --repo "${REPO}" --pattern "site-*.tar.gz" --dir "${WORK_DIR}"
 
 mkdir -p "${WORK_DIR}/extracted"
-tar -xzf "${WORK_DIR}/${ARTIFACT_NAME}" -C "${WORK_DIR}/extracted"
+tar -xzf "${WORK_DIR}"/site-*.tar.gz -C "${WORK_DIR}/extracted"
 
 echo "==> Restaurando en s3://${BUCKET}"
 aws s3 sync "${WORK_DIR}/extracted" "s3://${BUCKET}" \

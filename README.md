@@ -23,7 +23,7 @@ docs/           documentación entregable (arquitectura, runbook, costos, rollba
 ## Pipeline
 
 - **`pr-validation.yml`**: valida convención de rama, instala dependencias, build de referencia, `check-links`, Lighthouse CI, y delega en `reusable-security.yml` (SonarQube Cloud + Gitleaks, ambos bloqueantes).
-- **`release-deploy.yml`** (al hacer merge a `main`): build único por SHA → publica en JFrog Artifactory → Trivy SCA (bloqueante) → despliega integración → smoke test → si falla, rollback automático + evidencia; si pasa, marca la versión como estable y promueve el mismo artefacto a laboratorio (repite el ciclo) y, con aprobación de dos revisores, a producción → notificación final.
+- **`release-deploy.yml`** (al hacer merge a `main`): build único por SHA → publica como GitHub Release (`build-<SHA>`) → Trivy SCA (bloqueante) → despliega integración → smoke test → si falla, rollback automático + evidencia; si pasa, marca la versión como estable y promueve el mismo artefacto a laboratorio (repite el ciclo) y, con aprobación de dos revisores, a producción → notificación final.
 
 Ver `docs/gitops.md` para el detalle de por qué esto cuenta como GitOps sin Kubernetes, y `docs/rollback-strategy.md` para el mecanismo de recuperación.
 
@@ -36,5 +36,5 @@ make lint
 make test
 ```
 
-`scripts/deploy.sh`, `scripts/smoke-test.sh`, `scripts/rollback.sh`, `scripts/publish.sh` y `scripts/promote.sh` se pueden ejecutar localmente con las variables de entorno documentadas en `docs/runbook.md`, siempre y cuando se tengan credenciales AWS/JFrog válidas — en la práctica solo el pipeline los invoca.
+`scripts/deploy.sh`, `scripts/smoke-test.sh`, `scripts/rollback.sh`, `scripts/publish.sh` y `scripts/promote.sh` se pueden ejecutar localmente con credenciales AWS válidas y `gh` autenticado (para los que usan GitHub Releases) — en la práctica solo el pipeline los invoca.
 
