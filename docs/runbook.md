@@ -29,7 +29,7 @@
 
 ```
 cd terraform-modules
-git remote add origin https://github.com/<tu-usuario>/terraform-modules.git
+git remote add origin https://github.com/JulianMediina/terraform-modules.git
 git push -u origin main
 git tag v0.1.0
 git push origin v0.1.0
