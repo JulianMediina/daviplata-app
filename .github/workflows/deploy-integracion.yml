@@ -35,11 +35,17 @@ jobs:
 
       - run: npm ci
 
+      - name: calcular versión semántica
+        id: version
+        run: |
+          version=$(scripts/next-version.sh "${{ github.event.pull_request.head.sha }}")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
       - name: build (bundle inmutable por commit)
         run: npm run build
         env:
           BUILD_ENVIRONMENT: integracion
-          BUILD_VERSION: ${{ github.event.pull_request.head.sha }}
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
           BUILD_COMMIT: ${{ github.event.pull_request.head.sha }}
 
       - name: configurar identidad de git para el tag de versión
@@ -50,8 +56,8 @@ jobs:
       - name: publicar como GitHub Release versionado
         id: publish
         run: |
-          version=$(scripts/publish.sh "${{ github.event.pull_request.head.sha }}" "${{ github.repository }}" | tail -1)
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          scripts/publish.sh "${{ steps.version.outputs.version }}" "${{ github.event.pull_request.head.sha }}" "${{ github.repository }}"
+          echo "version=${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
 
       - name: SCA con Trivy
         run: |
