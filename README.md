@@ -38,3 +38,4 @@ make test
 
 `scripts/deploy.sh`, `scripts/smoke-test.sh`, `scripts/rollback.sh`, `scripts/publish.sh` y `scripts/promote.sh` se pueden ejecutar localmente con credenciales AWS válidas y `gh` autenticado (para los que usan GitHub Releases) — en la práctica solo el pipeline los invoca.
 
+
