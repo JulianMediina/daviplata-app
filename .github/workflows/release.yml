@@ -1,0 +1,66 @@
+name: release
+
+# Build + publicación como GitHub Release versionado (semver por
+# Conventional Commits). Dispara al cerrar (mergear) el PR hacia
+# "integracion" — nunca con push directo, para usar
+# github.event.pull_request.head.sha como referencia exacta del commit
+# revisado, sin importar la estrategia de merge que use GitHub.
+# El despliegue real a integración lo dispara "deploy" al terminar este
+# workflow (ver deploy.yml, disparador workflow_run) — separado para que
+# la lógica de build/release y la de desplegar+verificar no compartan un
+# mismo archivo ni un mismo job.
+on:
+  pull_request:
+    types: [closed]
+    branches: [integracion]
+
+permissions:
+  contents: write
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  release:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: calcular versión semántica
+        id: version
+        run: |
+          version=$(scripts/next-version.sh "${{ github.event.pull_request.head.sha }}")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: build (bundle inmutable por commit)
+        run: npm run build
+        env:
+          BUILD_ENVIRONMENT: integracion
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_COMMIT: ${{ github.event.pull_request.head.sha }}
+
+      - name: configurar identidad de git para el tag de versión
+        run: |
+          git config user.name "daviplata-ci"
+          git config user.email "ci@daviplata.local"
+
+      - name: publicar como GitHub Release versionado
+        run: scripts/publish.sh "${{ steps.version.outputs.version }}" "${{ github.event.pull_request.head.sha }}" "${{ github.repository }}"
+
+      - name: SCA con Trivy
+        run: |
+          mkdir -p /tmp/trivy-scan
+          tar -xzf "site-${{ github.event.pull_request.head.sha }}.tar.gz" -C /tmp/trivy-scan
+          docker run --rm -v /tmp/trivy-scan:/scan aquasec/trivy fs /scan \
+            --severity CRITICAL,HIGH --exit-code 1 --no-progress

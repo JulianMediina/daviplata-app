@@ -22,8 +22,9 @@ docs/           documentación entregable (arquitectura, runbook, costos, rollba
 
 ## Pipeline
 
-- **`pr-validation.yml`**: valida convención de rama, instala dependencias, build de referencia, `check-links`, Lighthouse CI, y delega en `reusable-security.yml` (SonarQube Cloud + Gitleaks, ambos bloqueantes).
-- **`release-deploy.yml`** (al hacer merge a `main`): build único por SHA → publica como GitHub Release (`build-<SHA>`) → Trivy SCA (bloqueante) → despliega integración → smoke test → si falla, rollback automático + evidencia; si pasa, marca la versión como estable y promueve el mismo artefacto a laboratorio (repite el ciclo) y, con aprobación de dos revisores, a producción → notificación final.
+- **`pr-validation.yml`**: valida convención de rama, instala dependencias, build de referencia, `check-links`, Lighthouse CI, y delega en `reusable-security.yml` (SonarQube Cloud + Gitleaks, ambos bloqueantes y requeridos en la protección de rama).
+- **`release.yml`** (al mergear a `integracion`): calcula la versión semántica (Conventional Commits), construye el bundle inmutable, lo publica como GitHub Release versionado y corre Trivy SCA (bloqueante).
+- **`deploy.yml`** (uno solo para los 3 ambientes): se dispara automáticamente cuando `release.yml` termina bien (despliega a integración) o al cerrar el PR de promoción hacia `laboratorio`/`main` (resuelve el ambiente de la rama base). Descarga el release ya publicado sin reconstruir, despliega, corre smoke test, marca la versión estable o hace rollback automático con evidencia, y notifica por correo (SNS) y opcionalmente Slack. También admite `workflow_dispatch` para redesplegar manualmente sin abrir un PR.
 
 Ver `docs/gitops.md` para el detalle de por qué esto cuenta como GitOps sin Kubernetes, y `docs/rollback-strategy.md` para el mecanismo de recuperación.
 
