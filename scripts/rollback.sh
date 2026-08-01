@@ -2,12 +2,13 @@
 # Restaura la última versión estable conocida: descarga el bundle marcado
 # como estable desde el GitHub Release correspondiente y lo vuelve a
 # sincronizar al bucket del ambiente.
-# Uso: rollback.sh <bucket> <distribution_id> <repo owner/name>
+# Uso: rollback.sh <bucket> <distribution_id> <repo owner/name> <ambiente>
 set -euo pipefail
 
 BUCKET="${1:?falta el nombre del bucket}"
 DISTRIBUTION_ID="${2:?falta el distribution id de CloudFront}"
 REPO="${3:?falta el repo (owner/name)}"
+ENVIRONMENT="${4:?falta el ambiente (integracion|laboratorio|produccion)}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK_DIR="$(mktemp -d)"
@@ -29,6 +30,12 @@ gh release download "${TAG}" --repo "${REPO}" --pattern "site-*.tar.gz" --dir "$
 
 mkdir -p "${WORK_DIR}/extracted"
 tar -xzf "${WORK_DIR}"/site-*.tar.gz -C "${WORK_DIR}/extracted"
+
+echo "==> Ajustando config.json y version.json al ambiente ${ENVIRONMENT}"
+cp "${ROOT_DIR}/config/config.${ENVIRONMENT}.json" "${WORK_DIR}/extracted/config.json"
+tmp_version="$(mktemp)"
+sed "s/\"environment\": \"[^\"]*\"/\"environment\": \"${ENVIRONMENT}\"/" "${WORK_DIR}/extracted/version.json" > "${tmp_version}"
+mv "${tmp_version}" "${WORK_DIR}/extracted/version.json"
 
 echo "==> Restaurando en s3://${BUCKET}"
 aws s3 sync "${WORK_DIR}/extracted" "s3://${BUCKET}" \

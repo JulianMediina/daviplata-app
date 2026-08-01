@@ -19,7 +19,7 @@ El bucket sí tiene versionado de S3 habilitado (además, como red de seguridad)
 
 ## Restauración de configuración
 
-`config.<ambiente>.json` viaja **dentro** del bundle (se copia como `dist/config.json` en build). Al restaurar el bundle anterior, la configuración anterior se restaura automáticamente — no hay un mecanismo de configuración separado que pueda quedar desincronizado del código.
+El código y los assets del bundle son inmutables y se promueven sin reconstruir, pero `config.<ambiente>.json` y el campo `environment` de `version.json` sí dependen de a qué ambiente se está desplegando en ese momento — no tendría sentido que el mismo bundle promovido a producción siguiera diciendo `"environment": "integracion"`. Por eso `scripts/deploy.sh` y `scripts/rollback.sh` sobrescriben `dist/config.json` y `version.json.environment` con el ambiente real justo antes de cada `aws s3 sync`, tanto en un despliegue normal como en un rollback. El resto del bundle (HTML, CSS, JS, `version.json.commit`) nunca cambia.
 
 ## Reversión de código vs. promoción de versión
 

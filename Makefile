@@ -14,7 +14,7 @@ publish:
 	scripts/publish.sh $(SHA) $(REPO)
 
 deploy:
-	scripts/deploy.sh $(BUCKET) $(DISTRIBUTION_ID)
+	scripts/deploy.sh $(BUCKET) $(DISTRIBUTION_ID) $(ENV)
 
 smoke:
 	scripts/smoke-test.sh $(URL) $(SHA)
@@ -23,4 +23,4 @@ promote:
 	scripts/promote.sh $(SHA) $(REPO) $(TO)
 
 rollback:
-	scripts/rollback.sh $(BUCKET) $(DISTRIBUTION_ID) $(REPO)
+	scripts/rollback.sh $(BUCKET) $(DISTRIBUTION_ID) $(REPO) $(ENV)

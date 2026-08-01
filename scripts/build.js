@@ -24,6 +24,11 @@ function copyRecursive(src, dest) {
 }
 
 function build() {
+  // El bundle se construye una sola vez y se promueve sin reconstruir; este
+  // "environment" es solo el valor inicial para pruebas locales. scripts/
+  // deploy.sh y rollback.sh sobrescriben config.json y version.json.environment
+  // con el ambiente real justo antes de cada sync, ya que eso sí cambia por
+  // destino aunque el resto del bundle no se toque.
   const environment = process.env.BUILD_ENVIRONMENT || "integracion";
   const version = process.env.BUILD_VERSION || "0.0.0-local";
   const commit = process.env.BUILD_COMMIT || "local";

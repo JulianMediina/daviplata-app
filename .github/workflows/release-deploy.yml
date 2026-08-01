@@ -63,7 +63,7 @@ jobs:
           tar -xzf "site-${{ github.sha }}.tar.gz" -C dist
 
       - name: desplegar
-        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}"
+        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" integracion
 
       - name: smoke test
         id: smoke
@@ -76,7 +76,7 @@ jobs:
       - name: rollback automático
         if: failure() && steps.smoke.outcome == 'failure'
         run: |
-          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" "${{ github.repository }}"
+          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" "${{ github.repository }}" integracion
           scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
 
       - name: subir evidencia de incidente
@@ -114,7 +114,7 @@ jobs:
           tar -xzf "site-${{ github.sha }}.tar.gz" -C dist
 
       - name: desplegar
-        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}"
+        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" laboratorio
 
       - name: smoke test
         id: smoke
@@ -127,7 +127,7 @@ jobs:
       - name: rollback automático
         if: failure() && steps.smoke.outcome == 'failure'
         run: |
-          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" "${{ github.repository }}"
+          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" "${{ github.repository }}" laboratorio
           scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
 
       - name: subir evidencia de incidente
@@ -168,7 +168,7 @@ jobs:
           tar -xzf "site-${{ github.sha }}.tar.gz" -C dist
 
       - name: desplegar
-        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}"
+        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" produccion
 
       - name: smoke test
         id: smoke
@@ -181,7 +181,7 @@ jobs:
       - name: rollback automático
         if: failure() && steps.smoke.outcome == 'failure'
         run: |
-          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" "${{ github.repository }}"
+          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" "${{ github.repository }}" produccion
           scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
 
       - name: subir evidencia de incidente
