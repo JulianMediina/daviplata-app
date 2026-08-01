@@ -2,7 +2,7 @@ name: pr-validation
 
 on:
   pull_request:
-    branches: [main]
+    branches: [integracion, laboratorio, main]
 
 permissions:
   contents: read
@@ -12,13 +12,35 @@ jobs:
   branch-name:
     runs-on: ubuntu-latest
     steps:
+      # La convención depende de a qué rama apunta el PR: contra "integracion"
+      # tiene que venir de un feature/fix/release; contra "laboratorio" o
+      # "main" tiene que venir exactamente de la rama de ambiente anterior
+      # (promoción), no de cualquier rama — así se respeta el orden
+      # feature -> integracion -> laboratorio -> main.
       - name: Validar convención de nombre de rama
         run: |
-          branch="${{ github.head_ref }}"
-          if [[ ! "$branch" =~ ^(feature|fix|release)/.+ ]]; then
-            echo "Rama '$branch' no cumple la convención feature/*, fix/* o release/*." >&2
-            exit 1
-          fi
+          base="${{ github.base_ref }}"
+          head="${{ github.head_ref }}"
+          case "$base" in
+            integracion)
+              if [[ ! "$head" =~ ^(feature|fix|release)/.+ ]]; then
+                echo "PR hacia integracion debe venir de feature/*, fix/* o release/* (rama: '$head')." >&2
+                exit 1
+              fi
+              ;;
+            laboratorio)
+              if [[ "$head" != "integracion" ]]; then
+                echo "PR hacia laboratorio solo puede venir de la rama integracion (rama: '$head')." >&2
+                exit 1
+              fi
+              ;;
+            main)
+              if [[ "$head" != "laboratorio" ]]; then
+                echo "PR hacia main solo puede venir de la rama laboratorio (rama: '$head')." >&2
+                exit 1
+              fi
+              ;;
+          esac
 
   build-and-test:
     runs-on: ubuntu-latest

@@ -14,7 +14,7 @@ flowchart LR
   RM -->|source ref=vX.Y.Z| RL
   RA --> GAapp[GHA: build/test/scan/deploy]
   RL --> GAinfra[GHA: plan/apply + drift]
-  GAapp -->|publica bundle :SHA| GHR[(GitHub Release)]
+  GAapp -->|publica bundle vX.Y.Z| GHR[(GitHub Release)]
   GAapp -->|OIDC por ambiente| IAM[IAM Roles]
   GAinfra -->|OIDC| IAM
 
@@ -41,7 +41,8 @@ flowchart LR
 |---|---|---|---|
 | Cuenta AWS | Una sola cuenta, separación lógica por ambiente | Una cuenta por ambiente | Costo de la prueba; se compensa con roles OIDC exclusivos, backends de estado exclusivos y nombres/tags por ambiente (§8 de la guía interna, ver `docs/cost.md`) |
 | Hosting | S3 privado + CloudFront con OAC | S3 Website endpoint | El website endpoint de S3 solo sirve por HTTP y no admite bucket privado; OAC permite bucket 100% privado con HTTPS |
-| Empaquetado | Bundle `dist/` inmutable, identificado por commit SHA | Reconstruir por ambiente | Trazabilidad: lo que se probó en integración es exactamente lo que llega a producción |
+| Empaquetado | Bundle `dist/` inmutable, versionado semánticamente (`vX.Y.Z`, calculado por Conventional Commits) y trazable al commit SHA que lo generó | Reconstruir por ambiente | Trazabilidad: lo que se probó en integración es exactamente lo que llega a producción |
+| Ramas | `integracion`/`laboratorio`/`main`, una por ambiente, con promoción por PR (`terraform-live` y `daviplata-app`) | Un solo `main` + gate de aprobación sobre el mismo commit | El equipo pidió explícitamente branch-per-environment; `terraform-modules` queda trunk-based porque no tiene "ambientes", se versiona por tag |
 | IaC | Terraform, módulos y "live" en repos separados | Todo en un repo | La separación por repo obliga a la separación módulo↔resource y a versionar los módulos de forma independiente |
 | Backend de estado | Un bucket + una tabla de lock por ambiente, creados una sola vez (`terraform-foundation`) | Backend único compartido | Aislamiento de blast radius: un error de estado en integración no puede tocar producción |
 | Publicación de artefactos | GitHub Releases (nativo, repos públicos) | JFrog Artifactory | Con los repos públicos, GitHub Releases da versionado, descarga y registro de artefactos sin costo ni cuenta externa; "promover" un ambiente ya no mueve el archivo (era una copia entre repos de JFrog), solo deja constancia en las notas del release de por dónde pasó — el binario nunca se reconstruye ni se duplica |

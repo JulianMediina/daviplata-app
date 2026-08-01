@@ -8,6 +8,7 @@
 - Cuenta gratuita creada en SonarQube Cloud (sonarcloud.io).
 - Node.js 20+ para el tooling de `daviplata-app`.
 - Los 4 repositorios creados en GitHub bajo el mismo usuario/organización (públicos, para que Actions y GitHub Releases no tengan costo).
+- `terraform-live` y `daviplata-app` usan un modelo de **rama por ambiente**: `integracion`, `laboratorio`, `main` (=producción). Ver `docs/gitops.md` para el flujo completo. `terraform-foundation` y `terraform-modules` se quedan con un solo `main` (trunk-based).
 
 ## 2. Credencial de arranque para `terraform-foundation`
 
@@ -53,28 +54,51 @@ El push a `main` dispara `foundation-apply.yml`: crea (si no existen) el bucket/
 
 Copia los outputs del job de apply (`gha_role_arns`, `tfstate_buckets`, `site_kms_key_arns`) — los necesitas para el siguiente paso.
 
-## 5. Configurar GitHub Environments y secrets
+## 5. Crear las ramas de ambiente y configurar GitHub Environments/secrets
 
-En cada uno de `terraform-live` y `daviplata-app`, crea 3 GitHub Environments: `integracion`, `laboratorio`, `produccion` (Settings → Environments). En `laboratorio` agrega 1 revisor requerido; en `produccion`, 2 (o el mismo revisor dos veces si es una cuenta individual — documentar la limitación).
+En `terraform-live` y `daviplata-app`, crea las ramas `integracion` y `laboratorio` a partir de `main` (que queda como producción):
+
+```
+git checkout -b integracion && git push -u origin integracion
+git checkout -b laboratorio && git push -u origin laboratorio
+```
+
+Protege las tres ramas (requiere PR + 1 revisión antes de mergear):
+
+```
+gh api --method PUT repos/<tu-usuario>/<repo>/branches/integracion/protection \
+  -f required_pull_request_reviews[required_approving_review_count]=1 \
+  -F enforce_admins=false
+# repetir para laboratorio y main
+```
+
+Crea 3 GitHub Environments en cada repo (Settings → Environments): `integracion`, `laboratorio`, `produccion`. En `laboratorio` agrega 1 revisor requerido; en `produccion`, 2 (o el mismo revisor dos veces si es una cuenta individual — documentado como limitación en `docs/gitops.md`).
 
 Por ambiente, agrega:
 - Secret `AWS_ROLE_ARN`: el `gha_role_arns.<ambiente>` que salió del bootstrap.
 - (Solo `daviplata-app`) Variables `SITE_BUCKET`, `DISTRIBUTION_ID`, `DISTRIBUTION_DOMAIN` — se obtienen de los outputs de `terraform-live` tras aplicar ese ambiente (paso 6).
 
-A nivel de repositorio (no por ambiente), en `daviplata-app` agrega el secret `SONAR_TOKEN` y, opcionalmente, `SLACK_WEBHOOK_URL`. **No hace falta ningún secret de artefactos**: la publicación usa GitHub Releases con el `GITHUB_TOKEN` que Actions ya inyecta automáticamente (solo hace falta el permiso `contents: write`, ya declarado en `release-deploy.yml`).
+A nivel de repositorio (no por ambiente), en `daviplata-app` agrega el secret `SONAR_TOKEN` y, opcionalmente, `SLACK_WEBHOOK_URL`. **No hace falta ningún secret de artefactos**: la publicación usa GitHub Releases con el `GITHUB_TOKEN` que Actions ya inyecta automáticamente (solo hace falta el permiso `contents: write`, ya declarado en los workflows `deploy-*.yml`).
 
 ## 6. Desplegar la infraestructura por ambiente
 
+La primera vez, empuja el código base a las tres ramas (`main`, `integracion`, `laboratorio` ya deberían tener el mismo contenido si se crearon como en el paso 5). Cambios posteriores siguen siempre el flujo de PR:
+
 ```
-cd terraform-live
-git push -u origin main
+feature/algo → PR hacia integracion → (merge) dispara apply-integracion.yml
+integracion  → PR hacia laboratorio → (merge) dispara apply-laboratorio.yml
+laboratorio  → PR hacia main        → (merge) dispara apply-produccion.yml (con aprobación)
 ```
 
-El push dispara `infra-apply.yml`: aplica integración → laboratorio → producción en ese orden, pausando en cada Environment protegido hasta que se apruebe. Para cambios posteriores, igual que foundation: PR → `infra-plan.yml` comenta el plan → merge → `infra-apply.yml` aplica.
+Cada `apply-*.yml` corre al **cerrar** el PR correspondiente (no con push directo), usando el commit exacto que se revisó.
 
 ## 7. Primer despliegue de la aplicación
 
-Mergear un PR a `main` en `daviplata-app` dispara `release-deploy.yml`: build → publicar como GitHub Release (`build-<SHA>`) → Trivy → desplegar integración → smoke → marcar promoción a laboratorio → smoke → (aprobación) → marcar promoción a producción → smoke → notificar.
+Mismo flujo de ramas que la infraestructura:
+
+1. PR de una rama `feature/*` hacia `integracion` → al mergear, `deploy-integracion.yml` construye el bundle **una sola vez**, calcula la versión semántica (`scripts/next-version.sh`, a partir de Conventional Commits), la publica como GitHub Release, corre Trivy, despliega y valida con smoke test.
+2. PR de `integracion` hacia `laboratorio` → al mergear, `deploy-laboratorio.yml` descarga **el mismo artefacto ya publicado** (sin reconstruir), lo despliega y valida.
+3. PR de `laboratorio` hacia `main` → al mergear, `deploy-produccion.yml` hace lo mismo, con aprobación del Environment `produccion` de por medio.
 
 ## 8. Diagnóstico rápido
 
@@ -87,7 +111,8 @@ Mergear un PR a `main` en `daviplata-app` dispara `release-deploy.yml`: build �
 | Se disparó un rollback | `docs/evidence/rollback/` + artefacto subido en la ejecución del workflow en GitHub Actions |
 | Drift detectado | Incidencia abierta automáticamente por `drift-detection.yml`; correr `make plan ENV=<ambiente>` en `terraform-live` para ver el detalle |
 | El sitio no carga / 403 | Revisar que la política del bucket (creada por el módulo `cloudfront-oac`) siga apuntando al ARN de distribución correcto; un cambio manual del bucket puede haberla roto |
-| No se encuentra el release/artefacto | `gh release list --repo <tu-usuario>/daviplata-app`; el tag es `build-<SHA>`, no el SHA solo |
+| No se encuentra el release/artefacto | `gh release list --repo <tu-usuario>/daviplata-app`; el tag es la versión semántica (`vX.Y.Z`), no el SHA — usa `git tag --points-at <sha>` para resolverlo a partir de un commit |
+| Un PR de promoción no pasa la validación de rama | `pr-validation.yml` exige que el PR venga exactamente de la rama anterior en la cadena (`integracion`→`laboratorio` debe venir de `integracion`, no de otra rama) — revisa el mensaje de error del job `branch-name` |
 
 ## 9. Reproducibilidad desde cero
 

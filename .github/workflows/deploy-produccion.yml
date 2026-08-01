@@ -1,0 +1,88 @@
+name: deploy-produccion
+
+# Dispara al cerrar (mergear) el PR de promoción laboratorio -> main. El
+# Environment "produccion" tiene revisor requerido — aprobación real de
+# cuatro ojos antes de que el job corra.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  deploy:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    environment: produccion
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: resolver versión del commit promovido
+        id: version
+        run: |
+          sha="${{ github.event.pull_request.head.sha }}"
+          version=$(git tag --points-at "$sha" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          if [ -z "$version" ]; then
+            echo "No encontré un tag de versión apuntando a $sha" >&2
+            exit 1
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: marcar promoción a producción
+        run: scripts/promote.sh "${{ steps.version.outputs.sha }}" "${{ github.repository }}" produccion
+
+      - name: descargar artefacto promovido
+        run: |
+          gh release download "${{ steps.version.outputs.version }}" --repo "${{ github.repository }}" --pattern "site-*.tar.gz"
+          mkdir -p dist
+          tar -xzf "site-"*.tar.gz -C dist
+
+      - name: desplegar
+        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" produccion
+
+      - name: smoke test
+        id: smoke
+        run: scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}" "${{ steps.version.outputs.sha }}"
+
+      - name: marcar como estable
+        if: success()
+        run: scripts/mark-stable.sh "${{ vars.SITE_BUCKET }}" "${{ steps.version.outputs.sha }}"
+
+      - name: rollback automático
+        if: failure() && steps.smoke.outcome == 'failure'
+        run: |
+          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" "${{ github.repository }}" produccion
+          scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
+
+      - name: subir evidencia de incidente
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollback-incidente-produccion-${{ steps.version.outputs.sha }}
+          path: docs/evidence/rollback/*.log
+          if-no-files-found: warn
+
+      - name: Notificar resultado
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "deploy-produccion ${{ steps.version.outputs.version }} (${{ steps.version.outputs.sha }}): ${{ job.status }}"
+            }

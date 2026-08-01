@@ -23,10 +23,15 @@ if [[ -z "${STABLE_SHA}" ]]; then
 fi
 
 echo "==> Última versión estable: ${STABLE_SHA}"
-TAG="build-${STABLE_SHA}"
+VERSION="$(git tag --points-at "${STABLE_SHA}" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
 
-echo "==> Descargando release ${TAG} de ${REPO}"
-gh release download "${TAG}" --repo "${REPO}" --pattern "site-*.tar.gz" --dir "${WORK_DIR}"
+if [[ -z "${VERSION}" ]]; then
+  echo "rollback: no encontré un tag de versión (vX.Y.Z) apuntando a ${STABLE_SHA}." >&2
+  exit 1
+fi
+
+echo "==> Descargando release ${VERSION} de ${REPO}"
+gh release download "${VERSION}" --repo "${REPO}" --pattern "site-*.tar.gz" --dir "${WORK_DIR}"
 
 mkdir -p "${WORK_DIR}/extracted"
 tar -xzf "${WORK_DIR}"/site-*.tar.gz -C "${WORK_DIR}/extracted"
@@ -50,7 +55,7 @@ aws cloudfront create-invalidation \
   --query "Invalidation.Id" \
   --output text
 
-echo "==> Rollback completado a la versión ${STABLE_SHA}"
+echo "==> Rollback completado a ${VERSION} (${STABLE_SHA})"
 
 INCIDENT_LOG="${ROOT_DIR}/docs/evidence/rollback/incident-$(date -u +%Y%m%dT%H%M%SZ).log"
 mkdir -p "$(dirname "${INCIDENT_LOG}")"
@@ -58,6 +63,7 @@ mkdir -p "$(dirname "${INCIDENT_LOG}")"
   echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "bucket=${BUCKET}"
   echo "distribution_id=${DISTRIBUTION_ID}"
+  echo "restored_version=${VERSION}"
   echo "restored_commit=${STABLE_SHA}"
 } > "${INCIDENT_LOG}"
 
