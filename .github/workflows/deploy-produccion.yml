@@ -31,12 +31,21 @@ jobs:
         id: version
         run: |
           sha="${{ github.event.pull_request.head.sha }}"
-          version=$(git tag --points-at "$sha" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          # El head.sha de un PR de promoción es la punta de la rama origen,
+          # que tras el merge suele ser un commit de merge distinto del commit
+          # que se etiquetó — por eso se busca el tag alcanzable (ancestro)
+          # más reciente en vez de exigir coincidencia exacta.
+          version=$(git tag --sort=-v:refname --merged "$sha" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
           if [ -z "$version" ]; then
-            echo "No encontré un tag de versión apuntando a $sha" >&2
+            echo "No encontré ningún tag de versión alcanzable desde $sha" >&2
             exit 1
           fi
-          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          # El commit que importa aguas abajo (smoke test, stable pointer,
+          # rollback) es el que realmente se construyó y horneó en el
+          # artefacto -es decir, al que apunta el tag- no la punta de la
+          # rama de promoción.
+          build_sha=$(git rev-list -n1 "$version")
+          echo "sha=${build_sha}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - uses: aws-actions/configure-aws-credentials@v4

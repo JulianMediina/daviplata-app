@@ -49,11 +49,16 @@ aws s3 sync "${WORK_DIR}/extracted" "s3://${BUCKET}" \
   --cache-control "public, max-age=300"
 
 echo "==> Invalidando CloudFront (${DISTRIBUTION_ID})"
-aws cloudfront create-invalidation \
+INVALIDATION_ID=$(aws cloudfront create-invalidation \
   --distribution-id "${DISTRIBUTION_ID}" \
   --paths "/*" \
   --query "Invalidation.Id" \
-  --output text
+  --output text)
+
+echo "==> Invalidación creada: ${INVALIDATION_ID}, esperando a que se propague..."
+aws cloudfront wait invalidation-completed \
+  --distribution-id "${DISTRIBUTION_ID}" \
+  --id "${INVALIDATION_ID}"
 
 echo "==> Rollback completado a ${VERSION} (${STABLE_SHA})"
 
