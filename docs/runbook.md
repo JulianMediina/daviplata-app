@@ -96,17 +96,17 @@ Cada `apply-*.yml` corre al **cerrar** el PR correspondiente (no con push direct
 
 Mismo flujo de ramas que la infraestructura:
 
-1. PR de una rama `feature/*` hacia `integracion` → al mergear, `deploy-integracion.yml` construye el bundle **una sola vez**, calcula la versión semántica (`scripts/next-version.sh`, a partir de Conventional Commits), la publica como GitHub Release, corre Trivy, despliega y valida con smoke test.
-2. PR de `integracion` hacia `laboratorio` → al mergear, `deploy-laboratorio.yml` descarga **el mismo artefacto ya publicado** (sin reconstruir), lo despliega y valida.
-3. PR de `laboratorio` hacia `main` → al mergear, `deploy-produccion.yml` hace lo mismo, con aprobación del Environment `produccion` de por medio.
+1. PR de una rama `feature/*` hacia `integracion` → al mergear, `release.yml` construye el bundle **una sola vez**, calcula la versión semántica (`scripts/next-version.sh`, a partir de Conventional Commits), la publica como GitHub Release y corre Trivy; al terminar, dispara automáticamente `deploy.yml` (vía `workflow_run`), que despliega a integración y valida con smoke test.
+2. PR de `integracion` hacia `laboratorio` → al mergear, el mismo `deploy.yml` (disparado ahora por el cierre del PR) descarga **el mismo artefacto ya publicado** (sin reconstruir), lo despliega a laboratorio y valida.
+3. PR de `laboratorio` hacia `main` → al mergear, `deploy.yml` hace lo mismo contra producción, con aprobación del Environment `produccion` de por medio. El ambiente siempre se resuelve de la rama base del PR (o de la punta de `integracion` cuando lo dispara `release.yml`) — es un único archivo para los 3 ambientes.
 
 ## 8. Diagnóstico rápido
 
 | Síntoma | Dónde mirar |
 |---|---|
-| El pipeline falla en `terraform plan` (foundation o live) | Comentario del PR en `foundation-plan.yml`/`infra-plan.yml`; revisar que el backend/tfvars del ambiente sean correctos |
+| El pipeline falla en `terraform plan` (foundation o live) | Comentario del PR en `foundation-plan.yml`/`plan.yml`; revisar que el backend/tfvars del ambiente sean correctos |
 | El pipeline falla en el quality gate de Sonar | Panel del proyecto en sonarcloud.io; el check de GitHub enlaza directo al análisis |
-| El pipeline falla en Trivy | Log del paso "SCA con Trivy" en `release-deploy.yml`; lista las CVE encontradas |
+| El pipeline falla en Trivy | Log del paso "SCA con Trivy" en `release.yml`; lista las CVE encontradas |
 | El smoke test falla | Log del paso "smoke test"; confirma manualmente con `curl https://<dominio>/health.json` y `curl https://<dominio>/version.json` |
 | Se disparó un rollback | `docs/evidence/rollback/` + artefacto subido en la ejecución del workflow en GitHub Actions |
 | Drift detectado | Incidencia abierta automáticamente por `drift-detection.yml`; correr `make plan ENV=<ambiente>` en `terraform-live` para ver el detalle |

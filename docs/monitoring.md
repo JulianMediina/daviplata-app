@@ -22,7 +22,7 @@ El módulo `observability` (`terraform-modules/modules/observability`) crea, por
 
 ## Extender a Slack/Teams
 
-El tópico SNS admite cualquier protocolo adicional de suscripción. Para Slack o Teams, la vía más simple es suscribir un endpoint HTTPS (webhook) al mismo tópico, o —como hace `release-deploy.yml`— enviar la notificación de resultado del pipeline directamente desde el workflow usando el secret `SLACK_WEBHOOK_URL`, sin pasar por SNS.
+El tópico SNS admite cualquier protocolo adicional de suscripción (además del correo ya configurado). `deploy.yml` ya publica en él el resultado de cada despliegue (versión, commit, resultado, link al run) sin importar si el smoke test pasó o falló. Para Slack o Teams, la vía más simple es suscribir un endpoint HTTPS (webhook) al mismo tópico, o —como ya deja preparado `deploy.yml`, condicionado a que exista el secret `SLACK_WEBHOOK_URL`— enviar la notificación directamente desde el workflow sin pasar por SNS.
 
 ## Qué falta con presupuesto ajustado
 
