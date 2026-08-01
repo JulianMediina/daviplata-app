@@ -8,6 +8,7 @@
 | Salud de la app | `/health.json`, consultado por el smoke test |
 | Versión desplegada | `/version.json`, con aserción `commit == SHA` esperado en el smoke test |
 | Tiempo de respuesta | Métrica `OriginLatency` de CloudFront + alarma sobre el umbral configurado por ambiente |
+| Resultado de cada despliegue | Publicado por `deploy.yml` al tópico SNS de observabilidad del ambiente (correo) en cada corrida, corra bien o mal |
 | Reintentos controlados | `smoke-test.sh` reintenta cada endpoint hasta `MAX_ATTEMPTS` veces con espera entre intentos |
 | Manejo de timeout | Cada request del smoke test tiene `--max-time`; cada job de GitHub Actions tiene su propio límite de tiempo |
 | Respuesta del pipeline a un fallo | Un smoke test fallido devuelve código de salida distinto de 0, lo que dispara el paso de rollback automático y la notificación |
