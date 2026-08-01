@@ -36,6 +36,14 @@ Confirma en GitHub Actions que `module-ci.yml` pasó en verde antes de continuar
 
 ## 4. Bootstrap de la plataforma
 
+Antes del primer push, define la variable de repositorio (no es secreta, así que va como `vars`, no como `secrets`) que usa `github_org`/`budget_notification_emails`:
+
+```
+gh variable set BUDGET_NOTIFICATION_EMAILS --repo <tu-usuario>/terraform-foundation --body '["tu-correo@example.com"]'
+```
+
+`github_org` no hace falta configurarlo: el workflow lo toma directo de `github.repository_owner`.
+
 ```
 cd terraform-foundation
 git push -u origin main

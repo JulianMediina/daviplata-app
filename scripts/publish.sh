@@ -17,11 +17,15 @@ TAG="build-${COMMIT_SHA}"
 echo "==> Empaquetando dist/ como ${ARTIFACT_NAME}"
 tar -czf "${ARTIFACT_PATH}" -C "${ROOT_DIR}/dist" .
 
-echo "==> Publicando release ${TAG} en ${REPO}"
-gh release create "${TAG}" "${ARTIFACT_PATH}" \
-  --repo "${REPO}" \
-  --target "${COMMIT_SHA}" \
-  --title "build ${COMMIT_SHA}" \
-  --notes "Bundle inmutable generado por release-deploy.yml para el commit ${COMMIT_SHA}."
+if gh release view "${TAG}" --repo "${REPO}" >/dev/null 2>&1; then
+  echo "==> ${TAG} ya existe en ${REPO} (re-ejecución del pipeline sobre el mismo commit) — no se reconstruye"
+else
+  echo "==> Publicando release ${TAG} en ${REPO}"
+  gh release create "${TAG}" "${ARTIFACT_PATH}" \
+    --repo "${REPO}" \
+    --target "${COMMIT_SHA}" \
+    --title "build ${COMMIT_SHA}" \
+    --notes "Bundle inmutable generado por release-deploy.yml para el commit ${COMMIT_SHA}."
+fi
 
 echo "==> Publicado: ${TAG} (${ARTIFACT_NAME})"
