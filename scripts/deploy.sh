@@ -42,4 +42,9 @@ INVALIDATION_ID=$(aws cloudfront create-invalidation \
   --query "Invalidation.Id" \
   --output text)
 
-echo "==> Invalidación creada: ${INVALIDATION_ID}"
+echo "==> Invalidación creada: ${INVALIDATION_ID}, esperando a que se propague..."
+aws cloudfront wait invalidation-completed \
+  --distribution-id "${DISTRIBUTION_ID}" \
+  --id "${INVALIDATION_ID}"
+
+echo "==> Invalidación completada"

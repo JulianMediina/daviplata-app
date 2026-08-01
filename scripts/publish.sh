@@ -22,7 +22,13 @@ echo "==> Empaquetando dist/ como ${ARTIFACT_NAME}"
 tar -czf "${ARTIFACT_PATH}" -C "${ROOT_DIR}/dist" .
 
 if gh release view "${VERSION}" --repo "${REPO}" >/dev/null 2>&1; then
-  echo "==> ${VERSION} ya existe en ${REPO} (re-ejecución del pipeline sobre el mismo commit) — no se reconstruye"
+  EXISTING_SHA=$(git rev-list -n1 "${VERSION}")
+  if [[ "${EXISTING_SHA}" != "${COMMIT_SHA}" ]]; then
+    echo "publish: ${VERSION} ya existe pero apunta a ${EXISTING_SHA}, no a ${COMMIT_SHA}." >&2
+    echo "publish: esto es una colisión de versión (rama base desactualizada o next-version.sh sin el tag ancestro correcto), no una re-ejecución segura." >&2
+    exit 1
+  fi
+  echo "==> ${VERSION} ya existe en ${REPO} y apunta al mismo commit (re-ejecución del pipeline) — no se reconstruye"
 else
   echo "==> Etiquetando ${COMMIT_SHA} como ${VERSION}"
   git tag -a "${VERSION}" "${COMMIT_SHA}" -m "Release ${VERSION}"
