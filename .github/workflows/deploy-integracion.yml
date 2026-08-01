@@ -113,6 +113,19 @@ jobs:
           path: docs/evidence/rollback/*.log
           if-no-files-found: warn
 
+      - name: notificar por correo (SNS)
+        if: always()
+        run: |
+          message=$(printf 'Ambiente: integracion\nVersion: %s\nCommit: %s\nResultado: %s\nRun: %s' \
+            "${{ needs.build-publish.outputs.version }}" \
+            "${{ needs.build-publish.outputs.sha }}" \
+            "${{ job.status }}" \
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+          aws sns publish \
+            --topic-arn "${{ vars.SNS_TOPIC_ARN }}" \
+            --subject "deploy-integracion ${{ needs.build-publish.outputs.version }}: ${{ job.status }}" \
+            --message "$message"
+
       - name: Notificar resultado
         if: always() && env.SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v1.27.0
