@@ -11,7 +11,7 @@ Cada ambiente mantiene un puntero de "última versión estable" en `s3://<bucket
 5. Vuelve a correr el smoke test para confirmar que el rollback dejó el ambiente sano (validación post-rollback).
 6. Escribe un log de incidente en `docs/evidence/rollback/incident-<timestamp>.log` con el bucket, la distribución y el commit restaurado.
 
-En el pipeline (`release-deploy.yml`), este flujo se dispara automáticamente: el paso "rollback automático" corre con `if: failure()` inmediatamente después de un smoke test fallido, y el log resultante se sube como artefacto del workflow.
+En el pipeline (`deploy.yml`), este flujo se dispara automáticamente: el paso "rollback automático" corre con `if: failure()` inmediatamente después de un smoke test fallido, y el log resultante se sube como artefacto del workflow.
 
 ## Por qué un puntero en S3 y no versionado objeto-por-objeto
 
@@ -26,7 +26,7 @@ El código y los assets del bundle son inmutables y se promueven sin reconstruir
 Dos mecanismos disponibles, documentados explícitamente porque cubren necesidades distintas:
 
 - **Rollback operativo (automático, en minutos):** re-promover/re-sincronizar el `<SHA>` anterior, como se describe arriba. No requiere tocar el repositorio ni generar un nuevo commit — es la vía por defecto y la que dispara el pipeline solo.
-- **Reversión de código (`git revert`):** cuando el problema no es un fallo de despliegue sino un defecto real que hay que corregir en el histórico — por ejemplo, si el commit desplegado tiene un bug que también hay que sacar de `main` para que el próximo `release-deploy` no lo vuelva a introducir. Se hace con PR normal, pasa por `pr-validation.yml` igual que cualquier otro cambio.
+- **Reversión de código (`git revert`):** cuando el problema no es un fallo de despliegue sino un defecto real que hay que corregir en el histórico — por ejemplo, si el commit desplegado tiene un bug que también hay que sacar de `integracion` para que el próximo `release.yml` no lo vuelva a introducir. Se hace con PR normal, pasa por `pr-validation.yml` igual que cualquier otro cambio.
 
 ## Registro de incidentes y evidencia
 
