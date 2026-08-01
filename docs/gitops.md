@@ -34,6 +34,6 @@ El artefacto de `daviplata-app` se construye **una sola vez**, al mergear a `int
 
 ## Control de cambios
 
-Branch protection en `integracion`/`laboratorio`/`main` (`terraform-live` y `daviplata-app`) exige PR + revisión antes de mergear; producción, además, exige aprobación explícita en su GitHub Environment antes de que `apply-produccion`/`deploy-produccion` corran. El historial de Git (quién y cuándo aprobó cada PR) más las notas de cada GitHub Release son, juntos, el registro de auditoría de la plataforma.
+Branch protection en `integracion`/`laboratorio`/`main` (`terraform-live` y `daviplata-app`) exige PR + revisión antes de mergear; producción, además, exige aprobación explícita en su GitHub Environment antes de que `apply.yml`/`deploy.yml` corran contra ese ambiente. El historial de Git (quién y cuándo aprobó cada PR) más las notas de cada GitHub Release son, juntos, el registro de auditoría de la plataforma.
 
 **Limitación conocida (cuenta individual):** GitHub permite que un administrador del repositorio evite (bypass) tanto el gate de revisión de PR como el de aprobación de Environment. En un equipo real, con revisores distintos al autor, este bypass no aplicaría porque el revisor sería otra persona. Aquí, al ser una cuenta de una sola persona, el control es honesto pero no absoluto — está documentado, no oculto.
