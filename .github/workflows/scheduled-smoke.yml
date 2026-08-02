@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
   issues: write
 
 jobs:
@@ -20,8 +21,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: resolver endpoint (SSM)
+        id: infra
+        run: |
+          endpoint=$(aws ssm get-parameter --name "/daviplata/${{ matrix.environment }}/ecs/service-endpoint" --query 'Parameter.Value' --output text)
+          echo "service_endpoint=${endpoint}" >> "$GITHUB_OUTPUT"
+
       - name: smoke test (canario de bajo costo)
-        run: scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
+        run: scripts/smoke-test.sh "${{ steps.infra.outputs.service_endpoint }}"
 
       - name: abrir incidencia si el ambiente no responde
         if: failure()

@@ -1,16 +1,20 @@
 name: deploy
 
 # Un solo workflow para los 3 ambientes, con dos formas de disparo real:
-#   - workflow_run: cuando "release" (build+publicación) termina bien, se
-#     despliega automáticamente a integración con lo que se acaba de publicar.
+#   - workflow_dispatch: "release.yml" lo dispara explícitamente al terminar
+#     de publicar en ECR (con --ref integracion), y también sirve para
+#     redesplegar manualmente sin abrir un PR. No se usa workflow_run aquí
+#     a propósito: ese disparador SIEMPRE ejecuta el archivo del workflow
+#     tal como existe en la rama default del repo (main), sin importar qué
+#     rama generó el evento — con branch-per-environment, eso significa que
+#     un cambio a deploy.yml no tendría efecto en el despliegue automático a
+#     integración hasta que llegara a main por la cadena de promoción
+#     normal. workflow_dispatch con --ref explícito no tiene ese problema.
 #   - pull_request cerrado hacia laboratorio/main: promociones — no se
-#     reconstruye nada, se resuelve y descarga el release ya publicado.
-# workflow_dispatch queda como reintento manual (p.ej. redesplegar la misma
-# versión sin abrir un PR nuevo).
+#     reconstruye nada, se copia la imagen ya publicada del ambiente
+#     anterior al repositorio ECR del ambiente destino y se apunta el
+#     servicio a ella.
 on:
-  workflow_run:
-    workflows: ["release"]
-    types: [completed]
   pull_request:
     types: [closed]
     branches: [laboratorio, main]
@@ -26,7 +30,7 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 env:
@@ -35,11 +39,10 @@ env:
 jobs:
   deploy:
     if: |
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'workflow_run' && 'integracion' || (github.base_ref == 'main' && 'produccion' || github.base_ref)) }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.base_ref == 'main' && 'produccion' || github.base_ref) }}
     env:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
@@ -48,35 +51,35 @@ jobs:
         run: |
           case "${{ github.event_name }}" in
             workflow_dispatch) env_name="${{ inputs.environment }}" ;;
-            workflow_run) env_name="integracion" ;;
             *)
               base="${{ github.base_ref }}"
               if [ "$base" = "main" ]; then env_name="produccion"; else env_name="$base"; fi
               ;;
           esac
           if [ "$env_name" = "produccion" ]; then branch="main"; else branch="$env_name"; fi
+          case "$env_name" in
+            integracion) previous="" ;;
+            laboratorio) previous="integracion" ;;
+            produccion)  previous="laboratorio" ;;
+          esac
           echo "environment=${env_name}" >> "$GITHUB_OUTPUT"
           echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+          echo "previous_environment=${previous}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.ctx.outputs.branch }}
           fetch-depth: 0
 
-      - name: resolver versión del release
+      - name: resolver versión a desplegar
         id: version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             version="${{ inputs.version }}"
           else
-            if [ "${{ github.event_name }}" = "workflow_run" ]; then
-              source_sha="${{ github.event.workflow_run.head_sha }}"
-            else
-              source_sha="${{ github.event.pull_request.head.sha }}"
-            fi
-            # El sha de origen puede ser un commit de merge (promoción) o el
-            # commit exacto que construyó "release" (primer despliegue) — el
-            # tag alcanzable más reciente cubre ambos casos por igual.
+            source_sha="${{ github.event.pull_request.head.sha }}"
+            # El sha de origen es un commit de merge (promoción) — el tag
+            # alcanzable más reciente resuelve la versión que se promovió.
             version=$(git tag --sort=-v:refname --merged "$source_sha" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
             if [ -z "$version" ]; then
               echo "No encontré ningún tag de versión alcanzable desde $source_sha" >&2
@@ -92,44 +95,73 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      - name: marcar promoción
-        if: steps.ctx.outputs.environment != 'integracion'
-        run: scripts/promote.sh "${{ steps.version.outputs.sha }}" "${{ github.repository }}" "${{ steps.ctx.outputs.environment }}"
-
-      - name: descargar artefacto publicado
+      # terraform-live publica estos valores en SSM Parameter Store al
+      # aplicar; evita depender de que alguien copie variables a mano entre
+      # repos cada vez que cambia la infraestructura.
+      - name: resolver infraestructura (SSM)
+        id: infra
         run: |
-          gh release download "${{ steps.version.outputs.version }}" --repo "${{ github.repository }}" --pattern "site-*.tar.gz"
-          mkdir -p dist
-          tar -xzf "site-"*.tar.gz -C dist
+          prefix="/daviplata/${{ steps.ctx.outputs.environment }}"
+          echo "repository_url=$(aws ssm get-parameter --name "${prefix}/ecr/repository-url" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          echo "cluster_name=$(aws ssm get-parameter --name "${prefix}/ecs/cluster-name" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          echo "service_name=$(aws ssm get-parameter --name "${prefix}/ecs/service-name" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          echo "service_arn=$(aws ssm get-parameter --name "${prefix}/ecs/service-arn" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          echo "service_endpoint=$(aws ssm get-parameter --name "${prefix}/ecs/service-endpoint" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          echo "sns_topic_arn=$(aws ssm get-parameter --name "${prefix}/sns/topic-arn" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ steps.ctx.outputs.previous_environment }}" ]; then
+            source_url=$(aws ssm get-parameter --name "/daviplata/${{ steps.ctx.outputs.previous_environment }}/ecr/repository-url" --query 'Parameter.Value' --output text)
+            echo "source_repository_url=${source_url}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: login en ECR
+        if: steps.ctx.outputs.environment != 'integracion'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: promover imagen (copiar del ambiente anterior, sin reconstruir)
+        if: steps.ctx.outputs.environment != 'integracion'
+        run: |
+          scripts/promote-image.sh \
+            "${{ steps.infra.outputs.source_repository_url }}" \
+            "${{ steps.infra.outputs.repository_url }}" \
+            "${{ steps.version.outputs.version }}"
 
       - name: desplegar
-        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" "${{ steps.ctx.outputs.environment }}"
+        id: deploy
+        run: |
+          scripts/deploy-ecs.sh \
+            "${{ steps.infra.outputs.service_arn }}" \
+            "${{ steps.infra.outputs.cluster_name }}" \
+            "${{ steps.infra.outputs.service_name }}" \
+            "${{ steps.infra.outputs.repository_url }}" \
+            "${{ steps.version.outputs.version }}"
 
       - name: smoke test
         id: smoke
-        run: scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}" "${{ steps.version.outputs.sha }}"
+        run: scripts/smoke-test.sh "${{ steps.infra.outputs.service_endpoint }}" "${{ steps.version.outputs.sha }}"
 
       - name: marcar como estable
         if: success()
-        run: scripts/mark-stable.sh "${{ vars.SITE_BUCKET }}" "${{ steps.version.outputs.sha }}"
+        run: scripts/mark-stable.sh "${{ steps.ctx.outputs.environment }}" "${{ steps.version.outputs.version }}"
 
       - name: rollback automático
-        if: failure() && steps.smoke.outcome == 'failure'
+        if: failure() && (steps.deploy.outcome == 'failure' || steps.smoke.outcome == 'failure')
         run: |
-          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" "${{ github.repository }}" "${{ steps.ctx.outputs.environment }}"
-          scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
-
-      - name: subir evidencia de incidente
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rollback-incidente-${{ steps.ctx.outputs.environment }}-${{ steps.version.outputs.sha }}
-          path: docs/evidence/rollback/*.log
-          if-no-files-found: warn
+          scripts/rollback-ecs.sh \
+            "${{ steps.infra.outputs.service_arn }}" \
+            "${{ steps.infra.outputs.cluster_name }}" \
+            "${{ steps.infra.outputs.service_name }}" \
+            "${{ steps.infra.outputs.repository_url }}" \
+            "${{ steps.ctx.outputs.environment }}"
+          scripts/smoke-test.sh "${{ steps.infra.outputs.service_endpoint }}"
 
       - name: notificar por correo (SNS)
         if: always()
         run: |
+          topic_arn="${{ steps.infra.outputs.sns_topic_arn }}"
+          if [ -z "$topic_arn" ]; then
+            echo "sin sns_topic_arn disponible, omito notificación"
+            exit 0
+          fi
           message=$(printf 'Ambiente: %s\nVersion: %s\nCommit: %s\nResultado: %s\nRun: %s' \
             "${{ steps.ctx.outputs.environment }}" \
             "${{ steps.version.outputs.version }}" \
@@ -137,7 +169,7 @@ jobs:
             "${{ job.status }}" \
             "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
           aws sns publish \
-            --topic-arn "${{ vars.SNS_TOPIC_ARN }}" \
+            --topic-arn "$topic_arn" \
             --subject "deploy-${{ steps.ctx.outputs.environment }} ${{ steps.version.outputs.version }}: ${{ job.status }}" \
             --message "$message"
 

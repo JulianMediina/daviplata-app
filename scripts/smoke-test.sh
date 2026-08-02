@@ -4,7 +4,7 @@
 # Uso: smoke-test.sh <base_url> [expected_commit] [max_attempts] [timeout_seconds]
 set -euo pipefail
 
-BASE_URL="${1:?falta la URL base, ej. https://d123.cloudfront.net}"
+BASE_URL="${1:?falta la URL base, ej. https://daviplata-integracion.us-east-1.on.aws}"
 EXPECTED_COMMIT="${2:-}"
 MAX_ATTEMPTS="${3:-5}"
 REQUEST_TIMEOUT="${4:-10}"
