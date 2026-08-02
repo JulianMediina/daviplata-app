@@ -2,7 +2,12 @@
 # juntos. Qué ambiente sirve cada contenedor se decide en runtime (variable
 # ENVIRONMENT), no en build -la misma imagen se promueve sin reconstruir,
 # igual que el bundle .tar.gz que este Dockerfile reemplaza.
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+# Tag "alpine" (no una versión de nginx fijada) a propósito: se reconstruye
+# seguido con los últimos parches de Alpine, a diferencia de un tag de minor
+# fijo que puede quedar con paquetes de SO desactualizados durante meses. El
+# scan de Trivy en release.yml es el que de verdad confirma que no hay
+# CRITICAL/HIGH sin parchar en cada build, no una versión fija "de una vez".
+FROM nginxinc/nginx-unprivileged:alpine
 
 # El resto de dist/ queda de solo lectura para el usuario de runtime (no hay
 # razón para que un proceso comprometido pueda modificar el sitio servido);
