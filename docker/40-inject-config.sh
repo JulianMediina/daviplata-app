@@ -1,7 +1,6 @@
 #!/bin/sh
 # Ejecutado automáticamente por la imagen base (docker-entrypoint.d/) antes
-# de arrancar nginx. Hace en runtime lo mismo que scripts/deploy.sh hace
-# antes de cada "aws s3 sync": fija config.json y version.json.environment al
+# de arrancar nginx: fija config.json y version.json.environment al
 # ambiente real del contenedor, sin reconstruir la imagen.
 #
 # El directorio web root es de solo lectura para el usuario nginx (solo

@@ -1,4 +1,4 @@
-.PHONY: lint test build publish deploy smoke promote rollback
+.PHONY: lint test build docker-build tag-version deploy smoke promote rollback mark-stable
 
 lint:
 	npm run lint
@@ -10,17 +10,23 @@ test: build
 build:
 	npm run build
 
-publish:
-	scripts/publish.sh $(SHA) $(REPO)
+docker-build: build
+	docker build -t $(REPOSITORY_URL):$(VERSION) .
+
+tag-version:
+	scripts/tag-version.sh $(VERSION) $(SHA)
 
 deploy:
-	scripts/deploy.sh $(BUCKET) $(DISTRIBUTION_ID) $(ENV)
+	scripts/deploy-ecs.sh $(SERVICE_ARN) $(CLUSTER) $(SERVICE_NAME) $(REPOSITORY_URL) $(VERSION)
 
 smoke:
 	scripts/smoke-test.sh $(URL) $(SHA)
 
+mark-stable:
+	scripts/mark-stable.sh $(ENV) $(VERSION)
+
 promote:
-	scripts/promote.sh $(SHA) $(REPO) $(TO)
+	scripts/promote-image.sh $(SOURCE_REPOSITORY_URL) $(REPOSITORY_URL) $(VERSION)
 
 rollback:
-	scripts/rollback.sh $(BUCKET) $(DISTRIBUTION_ID) $(REPO) $(ENV)
+	scripts/rollback-ecs.sh $(SERVICE_ARN) $(CLUSTER) $(SERVICE_NAME) $(REPOSITORY_URL) $(ENV)
