@@ -1,19 +1,20 @@
 name: deploy
 
 # Un solo workflow para los 3 ambientes, con dos formas de disparo real:
-#   - workflow_run: cuando "release" (build+publicación en ECR) termina
-#     bien, se despliega automáticamente a integración con la imagen que se
-#     acaba de publicar.
+#   - workflow_dispatch: "release.yml" lo dispara explícitamente al terminar
+#     de publicar en ECR (con --ref integracion), y también sirve para
+#     redesplegar manualmente sin abrir un PR. No se usa workflow_run aquí
+#     a propósito: ese disparador SIEMPRE ejecuta el archivo del workflow
+#     tal como existe en la rama default del repo (main), sin importar qué
+#     rama generó el evento — con branch-per-environment, eso significa que
+#     un cambio a deploy.yml no tendría efecto en el despliegue automático a
+#     integración hasta que llegara a main por la cadena de promoción
+#     normal. workflow_dispatch con --ref explícito no tiene ese problema.
 #   - pull_request cerrado hacia laboratorio/main: promociones — no se
 #     reconstruye nada, se copia la imagen ya publicada del ambiente
 #     anterior al repositorio ECR del ambiente destino y se apunta el
 #     servicio a ella.
-# workflow_dispatch queda como reintento manual (p.ej. redesplegar la misma
-# versión sin abrir un PR nuevo).
 on:
-  workflow_run:
-    workflows: ["release"]
-    types: [completed]
   pull_request:
     types: [closed]
     branches: [laboratorio, main]
@@ -38,11 +39,10 @@ env:
 jobs:
   deploy:
     if: |
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.event_name == 'workflow_run' && 'integracion' || (github.base_ref == 'main' && 'produccion' || github.base_ref)) }}
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.base_ref == 'main' && 'produccion' || github.base_ref) }}
     env:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
@@ -51,7 +51,6 @@ jobs:
         run: |
           case "${{ github.event_name }}" in
             workflow_dispatch) env_name="${{ inputs.environment }}" ;;
-            workflow_run) env_name="integracion" ;;
             *)
               base="${{ github.base_ref }}"
               if [ "$base" = "main" ]; then env_name="produccion"; else env_name="$base"; fi
@@ -78,14 +77,9 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             version="${{ inputs.version }}"
           else
-            if [ "${{ github.event_name }}" = "workflow_run" ]; then
-              source_sha="${{ github.event.workflow_run.head_sha }}"
-            else
-              source_sha="${{ github.event.pull_request.head.sha }}"
-            fi
-            # El sha de origen puede ser un commit de merge (promoción) o el
-            # commit exacto que construyó "release" (primer despliegue) — el
-            # tag alcanzable más reciente cubre ambos casos por igual.
+            source_sha="${{ github.event.pull_request.head.sha }}"
+            # El sha de origen es un commit de merge (promoción) — el tag
+            # alcanzable más reciente resuelve la versión que se promovió.
             version=$(git tag --sort=-v:refname --merged "$source_sha" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
             if [ -z "$version" ]; then
               echo "No encontré ningún tag de versión alcanzable desde $source_sha" >&2
