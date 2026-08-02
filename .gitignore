@@ -1,6 +1,18 @@
 node_modules/
 dist/
 *.tar.gz
-.env
 .DS_Store
 .lighthouseci/
+
+# Secretos y credenciales — nunca deben llegar al repo
+.env
+.env.*
+.aws/
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+credentials
+credentials.json
+*.tfvars.local
