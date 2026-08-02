@@ -21,7 +21,12 @@ aws ecs update-express-gateway-service \
   >/dev/null
 
 echo "==> Esperando a que el despliegue se estabilice"
-for i in $(seq 1 40); do
+# 80 intentos x 15s = 20 min: el primer despliegue real a un servicio recién
+# creado por Terraform compite con el intento inicial de arrancar la imagen
+# placeholder "bootstrap" (que no existe y falla en bucle hasta agotar sus
+# reintentos) -en un caso real, ese solape hizo que un despliegue que sí
+# terminó bien tardara más de los 10 minutos que este script permitía antes.
+for i in $(seq 1 80); do
   info=$(aws ecs describe-services --cluster "${CLUSTER}" --services "${SERVICE_NAME}" \
     --query 'services[0].{running:runningCount,desired:desiredCount,rollout:deployments[0].rolloutState}' \
     --output json)
