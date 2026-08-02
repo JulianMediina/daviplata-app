@@ -65,6 +65,15 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
+      # terraform-live publica estos valores en SSM Parameter Store al
+      # aplicar; evita depender de que alguien copie variables a mano entre
+      # repos cada vez que cambia la infraestructura.
+      - name: resolver infraestructura (SSM)
+        id: infra
+        run: |
+          repository_url=$(aws ssm get-parameter --name "/daviplata/integracion/ecr/repository-url" --query 'Parameter.Value' --output text)
+          echo "repository_url=${repository_url}" >> "$GITHUB_OUTPUT"
+
       - name: login en ECR
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
@@ -72,7 +81,7 @@ jobs:
       - name: build de la imagen
         run: |
           docker build \
-            -t "${{ vars.REPOSITORY_URL }}:${{ steps.version.outputs.version }}" \
+            -t "${{ steps.infra.outputs.repository_url }}:${{ steps.version.outputs.version }}" \
             .
 
       - name: SCA con Trivy (imagen)
@@ -81,7 +90,7 @@ jobs:
             -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy image \
             --severity CRITICAL,HIGH --exit-code 1 --no-progress \
-            "${{ vars.REPOSITORY_URL }}:${{ steps.version.outputs.version }}"
+            "${{ steps.infra.outputs.repository_url }}:${{ steps.version.outputs.version }}"
 
       - name: publicar imagen en ECR
-        run: docker push "${{ vars.REPOSITORY_URL }}:${{ steps.version.outputs.version }}"
+        run: docker push "${{ steps.infra.outputs.repository_url }}:${{ steps.version.outputs.version }}"

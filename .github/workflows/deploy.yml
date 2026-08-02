@@ -58,8 +58,14 @@ jobs:
               ;;
           esac
           if [ "$env_name" = "produccion" ]; then branch="main"; else branch="$env_name"; fi
+          case "$env_name" in
+            integracion) previous="" ;;
+            laboratorio) previous="integracion" ;;
+            produccion)  previous="laboratorio" ;;
+          esac
           echo "environment=${env_name}" >> "$GITHUB_OUTPUT"
           echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+          echo "previous_environment=${previous}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
@@ -95,6 +101,24 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
+      # terraform-live publica estos valores en SSM Parameter Store al
+      # aplicar; evita depender de que alguien copie variables a mano entre
+      # repos cada vez que cambia la infraestructura.
+      - name: resolver infraestructura (SSM)
+        id: infra
+        run: |
+          prefix="/daviplata/${{ steps.ctx.outputs.environment }}"
+          echo "repository_url=$(aws ssm get-parameter --name "${prefix}/ecr/repository-url" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          echo "cluster_name=$(aws ssm get-parameter --name "${prefix}/ecs/cluster-name" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          echo "service_name=$(aws ssm get-parameter --name "${prefix}/ecs/service-name" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          echo "service_arn=$(aws ssm get-parameter --name "${prefix}/ecs/service-arn" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          echo "service_endpoint=$(aws ssm get-parameter --name "${prefix}/ecs/service-endpoint" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          echo "sns_topic_arn=$(aws ssm get-parameter --name "${prefix}/sns/topic-arn" --query 'Parameter.Value' --output text)" >> "$GITHUB_OUTPUT"
+          if [ -n "${{ steps.ctx.outputs.previous_environment }}" ]; then
+            source_url=$(aws ssm get-parameter --name "/daviplata/${{ steps.ctx.outputs.previous_environment }}/ecr/repository-url" --query 'Parameter.Value' --output text)
+            echo "source_repository_url=${source_url}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: login en ECR
         if: steps.ctx.outputs.environment != 'integracion'
         uses: aws-actions/amazon-ecr-login@v2
@@ -103,23 +127,23 @@ jobs:
         if: steps.ctx.outputs.environment != 'integracion'
         run: |
           scripts/promote-image.sh \
-            "${{ vars.SOURCE_REPOSITORY_URL }}" \
-            "${{ vars.REPOSITORY_URL }}" \
+            "${{ steps.infra.outputs.source_repository_url }}" \
+            "${{ steps.infra.outputs.repository_url }}" \
             "${{ steps.version.outputs.version }}"
 
       - name: desplegar
         id: deploy
         run: |
           scripts/deploy-ecs.sh \
-            "${{ vars.SERVICE_ARN }}" \
-            "${{ vars.CLUSTER_NAME }}" \
-            "${{ vars.SERVICE_NAME }}" \
-            "${{ vars.REPOSITORY_URL }}" \
+            "${{ steps.infra.outputs.service_arn }}" \
+            "${{ steps.infra.outputs.cluster_name }}" \
+            "${{ steps.infra.outputs.service_name }}" \
+            "${{ steps.infra.outputs.repository_url }}" \
             "${{ steps.version.outputs.version }}"
 
       - name: smoke test
         id: smoke
-        run: scripts/smoke-test.sh "https://${{ vars.SERVICE_ENDPOINT }}" "${{ steps.version.outputs.sha }}"
+        run: scripts/smoke-test.sh "${{ steps.infra.outputs.service_endpoint }}" "${{ steps.version.outputs.sha }}"
 
       - name: marcar como estable
         if: success()
@@ -129,18 +153,19 @@ jobs:
         if: failure() && (steps.deploy.outcome == 'failure' || steps.smoke.outcome == 'failure')
         run: |
           scripts/rollback-ecs.sh \
-            "${{ vars.SERVICE_ARN }}" \
-            "${{ vars.CLUSTER_NAME }}" \
-            "${{ vars.SERVICE_NAME }}" \
-            "${{ vars.REPOSITORY_URL }}" \
+            "${{ steps.infra.outputs.service_arn }}" \
+            "${{ steps.infra.outputs.cluster_name }}" \
+            "${{ steps.infra.outputs.service_name }}" \
+            "${{ steps.infra.outputs.repository_url }}" \
             "${{ steps.ctx.outputs.environment }}"
-          scripts/smoke-test.sh "https://${{ vars.SERVICE_ENDPOINT }}"
+          scripts/smoke-test.sh "${{ steps.infra.outputs.service_endpoint }}"
 
       - name: notificar por correo (SNS)
         if: always()
         run: |
-          if [ -z "${{ vars.SNS_TOPIC_ARN }}" ]; then
-            echo "sin SNS_TOPIC_ARN configurado, omito notificación"
+          topic_arn="${{ steps.infra.outputs.sns_topic_arn }}"
+          if [ -z "$topic_arn" ]; then
+            echo "sin sns_topic_arn disponible, omito notificación"
             exit 0
           fi
           message=$(printf 'Ambiente: %s\nVersion: %s\nCommit: %s\nResultado: %s\nRun: %s' \
@@ -150,7 +175,7 @@ jobs:
             "${{ job.status }}" \
             "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
           aws sns publish \
-            --topic-arn "${{ vars.SNS_TOPIC_ARN }}" \
+            --topic-arn "$topic_arn" \
             --subject "deploy-${{ steps.ctx.outputs.environment }} ${{ steps.version.outputs.version }}: ${{ job.status }}" \
             --message "$message"
 
