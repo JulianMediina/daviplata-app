@@ -44,26 +44,36 @@ jobs:
 
       - run: npm ci
 
-      - name: calcular versión semántica
-        id: version
+      # Lee Conventional Commits desde el último tag alcanzable (no solo el
+      # último commit) y crea + empuja el tag vX.Y.Z. pr-validation.yml ya
+      # exige que el título del PR (mensaje del squash-merge) traiga un
+      # prefijo reconocible, así que "no hubo release" aquí solo puede
+      # significar un error real, no una omisión silenciosa.
+      - name: semantic-release (calcula versión y crea el tag)
+        id: semrel
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          semantic_version: 23
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_AUTHOR_NAME: daviplata-ci
+          GIT_AUTHOR_EMAIL: ci@daviplata.local
+          GIT_COMMITTER_NAME: daviplata-ci
+          GIT_COMMITTER_EMAIL: ci@daviplata.local
+
+      - name: verificar que se publicó una versión
+        if: steps.semrel.outputs.new_release_published != 'true'
         run: |
-          version=$(scripts/next-version.sh "${{ github.event.pull_request.head.sha }}")
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "semantic-release no generó ninguna version nueva para este merge." >&2
+          echo "Revisa que el titulo del PR haya traido un prefijo Conventional Commits valido (feat:, fix:, etc.)." >&2
+          exit 1
 
       - name: build (bundle inmutable por commit)
         run: npm run build
         env:
           BUILD_ENVIRONMENT: integracion
-          BUILD_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_VERSION: ${{ steps.semrel.outputs.new_release_git_tag }}
           BUILD_COMMIT: ${{ github.event.pull_request.head.sha }}
-
-      - name: configurar identidad de git para el tag de versión
-        run: |
-          git config user.name "daviplata-ci"
-          git config user.email "ci@daviplata.local"
-
-      - name: etiquetar versión
-        run: scripts/tag-version.sh "${{ steps.version.outputs.version }}" "${{ github.event.pull_request.head.sha }}"
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -86,7 +96,7 @@ jobs:
       - name: build de la imagen
         run: |
           docker build \
-            -t "${{ steps.infra.outputs.repository_url }}:${{ steps.version.outputs.version }}" \
+            -t "${{ steps.infra.outputs.repository_url }}:${{ steps.semrel.outputs.new_release_git_tag }}" \
             .
 
       - name: SCA con Trivy (imagen)
@@ -95,10 +105,10 @@ jobs:
             -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy image \
             --severity CRITICAL,HIGH --exit-code 1 --no-progress \
-            "${{ steps.infra.outputs.repository_url }}:${{ steps.version.outputs.version }}"
+            "${{ steps.infra.outputs.repository_url }}:${{ steps.semrel.outputs.new_release_git_tag }}"
 
       - name: publicar imagen en ECR
-        run: docker push "${{ steps.infra.outputs.repository_url }}:${{ steps.version.outputs.version }}"
+        run: docker push "${{ steps.infra.outputs.repository_url }}:${{ steps.semrel.outputs.new_release_git_tag }}"
 
       # --ref integracion asegura que se ejecute la versión de deploy.yml que
       # de verdad existe en esta rama, no la que haya en main en este momento
@@ -109,4 +119,4 @@ jobs:
             --repo "${{ github.repository }}" \
             --ref integracion \
             -f environment=integracion \
-            -f version="${{ steps.version.outputs.version }}"
+            -f version="${{ steps.semrel.outputs.new_release_git_tag }}"

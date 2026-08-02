@@ -2,6 +2,7 @@ name: pr-validation
 
 on:
   pull_request:
+    types: [opened, edited, synchronize, reopened]
     branches: [integracion, laboratorio, main]
 
 permissions:
@@ -9,6 +10,19 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Solo se exige en PRs hacia integracion: el titulo del PR es el mensaje
+  # de commit que queda en la rama tras el squash-merge, y es lo que
+  # semantic-release lee para decidir el tipo de version (ver .releaserc.json
+  # y release.yml). Los PR de promocion hacia laboratorio/main no generan
+  # version nueva, así que no tienen por que seguir este formato.
+  pr-title:
+    if: github.base_ref == 'integracion'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   branch-name:
     runs-on: ubuntu-latest
     steps:
