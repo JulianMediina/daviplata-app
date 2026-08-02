@@ -1,10 +1,15 @@
 name: release
 
 # Build + publicación como imagen versionada en ECR (semver por Conventional
-# Commits). Dispara al cerrar (mergear) el PR hacia "integracion" — nunca
-# con push directo, para usar github.event.pull_request.head.sha como
-# referencia exacta del commit revisado, sin importar la estrategia de
-# merge que use GitHub.
+# Commits). Dispara con push a "integracion" — no con pull_request:closed:
+# semantic-release detecta el evento de CI y se niega a publicar si lo
+# corre un pull_request ("This run was triggered by a pull request and
+# therefore a new version won't be published"), sin importar si el PR ya
+# está mergeado. El repo tiene deshabilitado merge commit y rebase merge
+# (solo squash), así que cada push a integracion es exactamente un commit:
+# el título del PR como mensaje (squash_merge_commit_title=PR_TITLE), que
+# es lo que valida pr-title en pr-validation.yml y lo que lee
+# @semantic-release/commit-analyzer.
 # El despliegue real a integración lo dispara este mismo workflow al final,
 # vía "gh workflow run deploy.yml --ref integracion" (ver último paso) — no
 # con el disparador workflow_run, que SIEMPRE ejecuta el archivo del
@@ -14,8 +19,7 @@ name: release
 # la versión vieja para el despliegue automático a integración -un disparo
 # explícito con --ref evita ese problema.
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches: [integracion]
 
 permissions:
@@ -28,13 +32,11 @@ env:
 
 jobs:
   release:
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     environment: integracion
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -73,7 +75,7 @@ jobs:
         env:
           BUILD_ENVIRONMENT: integracion
           BUILD_VERSION: ${{ steps.semrel.outputs.new_release_git_tag }}
-          BUILD_COMMIT: ${{ github.event.pull_request.head.sha }}
+          BUILD_COMMIT: ${{ github.sha }}
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
