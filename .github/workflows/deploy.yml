@@ -1,10 +1,13 @@
 name: deploy
 
 # Un solo workflow para los 3 ambientes, con dos formas de disparo real:
-#   - workflow_run: cuando "release" (build+publicación) termina bien, se
-#     despliega automáticamente a integración con lo que se acaba de publicar.
+#   - workflow_run: cuando "release" (build+publicación en ECR) termina
+#     bien, se despliega automáticamente a integración con la imagen que se
+#     acaba de publicar.
 #   - pull_request cerrado hacia laboratorio/main: promociones — no se
-#     reconstruye nada, se resuelve y descarga el release ya publicado.
+#     reconstruye nada, se copia la imagen ya publicada del ambiente
+#     anterior al repositorio ECR del ambiente destino y se apunta el
+#     servicio a ella.
 # workflow_dispatch queda como reintento manual (p.ej. redesplegar la misma
 # versión sin abrir un PR nuevo).
 on:
@@ -26,7 +29,7 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 env:
@@ -63,7 +66,7 @@ jobs:
           ref: ${{ steps.ctx.outputs.branch }}
           fetch-depth: 0
 
-      - name: resolver versión del release
+      - name: resolver versión a desplegar
         id: version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -92,44 +95,54 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
-      - name: marcar promoción
+      - name: login en ECR
         if: steps.ctx.outputs.environment != 'integracion'
-        run: scripts/promote.sh "${{ steps.version.outputs.sha }}" "${{ github.repository }}" "${{ steps.ctx.outputs.environment }}"
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: descargar artefacto publicado
+      - name: promover imagen (copiar del ambiente anterior, sin reconstruir)
+        if: steps.ctx.outputs.environment != 'integracion'
         run: |
-          gh release download "${{ steps.version.outputs.version }}" --repo "${{ github.repository }}" --pattern "site-*.tar.gz"
-          mkdir -p dist
-          tar -xzf "site-"*.tar.gz -C dist
+          scripts/promote-image.sh \
+            "${{ vars.SOURCE_REPOSITORY_URL }}" \
+            "${{ vars.REPOSITORY_URL }}" \
+            "${{ steps.version.outputs.version }}"
 
       - name: desplegar
-        run: scripts/deploy.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" "${{ steps.ctx.outputs.environment }}"
+        id: deploy
+        run: |
+          scripts/deploy-ecs.sh \
+            "${{ vars.SERVICE_ARN }}" \
+            "${{ vars.CLUSTER_NAME }}" \
+            "${{ vars.SERVICE_NAME }}" \
+            "${{ vars.REPOSITORY_URL }}" \
+            "${{ steps.version.outputs.version }}"
 
       - name: smoke test
         id: smoke
-        run: scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}" "${{ steps.version.outputs.sha }}"
+        run: scripts/smoke-test.sh "https://${{ vars.SERVICE_ENDPOINT }}" "${{ steps.version.outputs.sha }}"
 
       - name: marcar como estable
         if: success()
-        run: scripts/mark-stable.sh "${{ vars.SITE_BUCKET }}" "${{ steps.version.outputs.sha }}"
+        run: scripts/mark-stable.sh "${{ steps.ctx.outputs.environment }}" "${{ steps.version.outputs.version }}"
 
       - name: rollback automático
-        if: failure() && steps.smoke.outcome == 'failure'
+        if: failure() && (steps.deploy.outcome == 'failure' || steps.smoke.outcome == 'failure')
         run: |
-          scripts/rollback.sh "${{ vars.SITE_BUCKET }}" "${{ vars.DISTRIBUTION_ID }}" "${{ github.repository }}" "${{ steps.ctx.outputs.environment }}"
-          scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
-
-      - name: subir evidencia de incidente
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: rollback-incidente-${{ steps.ctx.outputs.environment }}-${{ steps.version.outputs.sha }}
-          path: docs/evidence/rollback/*.log
-          if-no-files-found: warn
+          scripts/rollback-ecs.sh \
+            "${{ vars.SERVICE_ARN }}" \
+            "${{ vars.CLUSTER_NAME }}" \
+            "${{ vars.SERVICE_NAME }}" \
+            "${{ vars.REPOSITORY_URL }}" \
+            "${{ steps.ctx.outputs.environment }}"
+          scripts/smoke-test.sh "https://${{ vars.SERVICE_ENDPOINT }}"
 
       - name: notificar por correo (SNS)
         if: always()
         run: |
+          if [ -z "${{ vars.SNS_TOPIC_ARN }}" ]; then
+            echo "sin SNS_TOPIC_ARN configurado, omito notificación"
+            exit 0
+          fi
           message=$(printf 'Ambiente: %s\nVersion: %s\nCommit: %s\nResultado: %s\nRun: %s' \
             "${{ steps.ctx.outputs.environment }}" \
             "${{ steps.version.outputs.version }}" \

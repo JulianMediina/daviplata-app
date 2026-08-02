@@ -1,10 +1,10 @@
 name: release
 
-# Build + publicación como GitHub Release versionado (semver por
-# Conventional Commits). Dispara al cerrar (mergear) el PR hacia
-# "integracion" — nunca con push directo, para usar
-# github.event.pull_request.head.sha como referencia exacta del commit
-# revisado, sin importar la estrategia de merge que use GitHub.
+# Build + publicación como imagen versionada en ECR (semver por Conventional
+# Commits). Dispara al cerrar (mergear) el PR hacia "integracion" — nunca
+# con push directo, para usar github.event.pull_request.head.sha como
+# referencia exacta del commit revisado, sin importar la estrategia de
+# merge que use GitHub.
 # El despliegue real a integración lo dispara "deploy" al terminar este
 # workflow (ver deploy.yml, disparador workflow_run) — separado para que
 # la lógica de build/release y la de desplegar+verificar no compartan un
@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -24,6 +25,7 @@ jobs:
   release:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    environment: integracion
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,12 +57,31 @@ jobs:
           git config user.name "daviplata-ci"
           git config user.email "ci@daviplata.local"
 
-      - name: publicar como GitHub Release versionado
-        run: scripts/publish.sh "${{ steps.version.outputs.version }}" "${{ github.event.pull_request.head.sha }}" "${{ github.repository }}"
+      - name: etiquetar versión
+        run: scripts/tag-version.sh "${{ steps.version.outputs.version }}" "${{ github.event.pull_request.head.sha }}"
 
-      - name: SCA con Trivy
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: login en ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: build de la imagen
         run: |
-          mkdir -p /tmp/trivy-scan
-          tar -xzf "site-${{ github.event.pull_request.head.sha }}.tar.gz" -C /tmp/trivy-scan
-          docker run --rm -v /tmp/trivy-scan:/scan aquasec/trivy fs /scan \
-            --severity CRITICAL,HIGH --exit-code 1 --no-progress
+          docker build \
+            -t "${{ vars.REPOSITORY_URL }}:${{ steps.version.outputs.version }}" \
+            .
+
+      - name: SCA con Trivy (imagen)
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy image \
+            --severity CRITICAL,HIGH --exit-code 1 --no-progress \
+            "${{ vars.REPOSITORY_URL }}:${{ steps.version.outputs.version }}"
+
+      - name: publicar imagen en ECR
+        run: docker push "${{ vars.REPOSITORY_URL }}:${{ steps.version.outputs.version }}"
