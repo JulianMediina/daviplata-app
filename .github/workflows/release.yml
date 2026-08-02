@@ -5,10 +5,14 @@ name: release
 # con push directo, para usar github.event.pull_request.head.sha como
 # referencia exacta del commit revisado, sin importar la estrategia de
 # merge que use GitHub.
-# El despliegue real a integración lo dispara "deploy" al terminar este
-# workflow (ver deploy.yml, disparador workflow_run) — separado para que
-# la lógica de build/release y la de desplegar+verificar no compartan un
-# mismo archivo ni un mismo job.
+# El despliegue real a integración lo dispara este mismo workflow al final,
+# vía "gh workflow run deploy.yml --ref integracion" (ver último paso) — no
+# con el disparador workflow_run, que SIEMPRE ejecuta el archivo del
+# workflow tal como existe en la rama default del repo (main), sin importar
+# qué rama generó el evento. Mientras un cambio a deploy.yml no llegue a
+# main por la cadena de promoción normal, workflow_run seguiría corriendo
+# la versión vieja para el despliegue automático a integración -un disparo
+# explícito con --ref evita ese problema.
 on:
   pull_request:
     types: [closed]
@@ -17,6 +21,7 @@ on:
 permissions:
   contents: write
   id-token: write
+  actions: write
 
 env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -94,3 +99,14 @@ jobs:
 
       - name: publicar imagen en ECR
         run: docker push "${{ steps.infra.outputs.repository_url }}:${{ steps.version.outputs.version }}"
+
+      # --ref integracion asegura que se ejecute la versión de deploy.yml que
+      # de verdad existe en esta rama, no la que haya en main en este momento
+      # (a diferencia de workflow_run, que ignora --ref y siempre usa main).
+      - name: disparar despliegue a integración
+        run: |
+          gh workflow run deploy.yml \
+            --repo "${{ github.repository }}" \
+            --ref integracion \
+            -f environment=integracion \
+            -f version="${{ steps.version.outputs.version }}"
