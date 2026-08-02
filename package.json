@@ -2,7 +2,7 @@
   "name": "daviplata-app",
   "version": "1.0.0",
   "private": true,
-  "description": "Sitio estático de referencia para la prueba técnica DevSecOps.",
+  "description": "Sitio estático de DaviPlata, empaquetado en contenedor y desplegado en ECS Express Mode.",
   "scripts": {
     "build": "node scripts/build.js",
     "lint:html": "html-validate \"src/**/*.html\"",
