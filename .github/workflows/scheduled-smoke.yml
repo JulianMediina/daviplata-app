@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: smoke test (canario de bajo costo)
-        run: scripts/smoke-test.sh "https://${{ vars.DISTRIBUTION_DOMAIN }}"
+        run: scripts/smoke-test.sh "https://${{ vars.SERVICE_ENDPOINT }}"
 
       - name: abrir incidencia si el ambiente no responde
         if: failure()

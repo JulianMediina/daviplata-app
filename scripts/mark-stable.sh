@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# Marca un commit como la última versión estable del ambiente, para que
-# rollback.sh sepa a qué artefacto volver si un despliegue futuro falla.
-# Solo debe llamarse después de que el smoke test pase.
-# Uso: mark-stable.sh <bucket> <commit_sha>
+# Marca una versión como la última estable del ambiente en SSM Parameter
+# Store, para que rollback-ecs.sh sepa a qué versión volver si un
+# despliegue futuro falla. Solo debe llamarse después de que el smoke test
+# pase.
+# Uso: mark-stable.sh <ambiente> <version>
 set -euo pipefail
 
-BUCKET="${1:?falta el nombre del bucket}"
-COMMIT_SHA="${2:?falta el commit SHA}"
+ENVIRONMENT="${1:?falta el ambiente}"
+VERSION="${2:?falta la versión (vX.Y.Z)}"
 
-echo -n "${COMMIT_SHA}" | aws s3 cp - "s3://${BUCKET}/_meta/stable.txt" --content-type "text/plain"
-echo "==> ${BUCKET}/_meta/stable.txt actualizado a ${COMMIT_SHA}"
+aws ssm put-parameter \
+  --name "/daviplata/${ENVIRONMENT}/stable-version" \
+  --value "${VERSION}" \
+  --type String \
+  --overwrite
+
+echo "==> /daviplata/${ENVIRONMENT}/stable-version actualizado a ${VERSION}"
