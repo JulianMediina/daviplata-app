@@ -1,16 +1,18 @@
 name: scheduled-smoke
 
-# Sin "environment:" a propósito: este job es de solo lectura (un curl
-# contra un endpoint público) disparado por cron, sin ningún humano
-# presente para aprobar un gate de despliegue. Antes usaba
-# "environment: ${{ matrix.environment }}" solo para heredar el secret
-# AWS_ROLE_ARN de ese Environment -pero eso también hereda el requisito de
-# aprobación que existe para despliegues reales, y una corrida sin
-# aprobación queda en "waiting" para siempre (encontrado en la cuenta real:
-# decenas de corridas acumuladas sin ejecutarse nunca). El ARN del rol no es
-# secreto (no otorga acceso sin que además coincida la condición de OIDC del
-# trust policy), así que vive en variables de repo, no en secrets de
-# Environment.
+# Usa "<ambiente>-readonly" en vez de "<ambiente>" a propósito: este job es
+# de solo lectura (un curl contra un endpoint público) disparado por cron,
+# sin ningún humano presente para aprobar un gate de despliegue. El
+# Environment "<ambiente>" (el que usa deploy.yml) exige aprobación humana
+# para despliegues reales -heredarlo aquí deja la corrida en "waiting" para
+# siempre (encontrado en la cuenta real: decenas de corridas acumuladas sin
+# ejecutarse nunca). "<ambiente>-readonly" es un Environment aparte, sin
+# reviewers, que existe solo para que el token OIDC conserve el claim
+# "environment:<ambiente>-readonly" que el trust policy de IAM exige
+# (ver terraform-foundation/bootstrap/main.tf) -sin ese claim, el trust
+# policy no puede distinguir qué matriz corresponde a qué rol. (Un intento
+# anterior quitó "environment:" del todo y rompió la autenticación OIDC con
+# AccessDenied -confirmado en una corrida real.)
 on:
   schedule:
     - cron: "*/30 * * * *" # cada 30 minutos
@@ -28,12 +30,13 @@ jobs:
       matrix:
         environment: [integracion, laboratorio, produccion]
     runs-on: ubuntu-latest
+    environment: ${{ matrix.environment }}-readonly
     steps:
       - uses: actions/checkout@v4
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars[format('AWS_ROLE_ARN_{0}', matrix.environment)] }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
       - name: resolver endpoint (SSM)
