@@ -1,5 +1,16 @@
 name: scheduled-smoke
 
+# Sin "environment:" a propósito: este job es de solo lectura (un curl
+# contra un endpoint público) disparado por cron, sin ningún humano
+# presente para aprobar un gate de despliegue. Antes usaba
+# "environment: ${{ matrix.environment }}" solo para heredar el secret
+# AWS_ROLE_ARN de ese Environment -pero eso también hereda el requisito de
+# aprobación que existe para despliegues reales, y una corrida sin
+# aprobación queda en "waiting" para siempre (encontrado en la cuenta real:
+# decenas de corridas acumuladas sin ejecutarse nunca). El ARN del rol no es
+# secreto (no otorga acceso sin que además coincida la condición de OIDC del
+# trust policy), así que vive en variables de repo, no en secrets de
+# Environment.
 on:
   schedule:
     - cron: "*/30 * * * *" # cada 30 minutos
@@ -17,13 +28,12 @@ jobs:
       matrix:
         environment: [integracion, laboratorio, produccion]
     runs-on: ubuntu-latest
-    environment: ${{ matrix.environment }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ vars[format('AWS_ROLE_ARN_{0}', matrix.environment)] }}
           aws-region: us-east-1
 
       - name: resolver endpoint (SSM)
@@ -35,15 +45,66 @@ jobs:
       - name: smoke test (canario de bajo costo)
         run: scripts/smoke-test.sh "${{ steps.infra.outputs.service_endpoint }}"
 
-      - name: abrir incidencia si el ambiente no responde
+      # Evita duplicar incidencias: si ya hay una abierta para este ambiente,
+      # no crea otra -antes cada corrida fallida abria una nueva, y en un
+      # ambiente con fallas repetidas (o intermitencias de red) eso llena el
+      # tracker de decenas de issues idénticas en vez de una sola con
+      # contexto acumulado.
+      - name: abrir o actualizar incidencia si el ambiente no responde
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.issues.create({
+            const title = `Smoke programado falló en ${{ matrix.environment }}`;
+            const { data: existing } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Smoke programado falló en ${{ matrix.environment }}`,
-              labels: ["incident", "${{ matrix.environment }}"],
-              body: "El smoke test programado no pudo validar / , /health.json o /version.json. Revisar el dashboard de CloudWatch y el log de este workflow.",
+              state: "open",
+              labels: "incident,${{ matrix.environment }}",
             });
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            if (existing.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing[0].number,
+                body: `Volvió a fallar: ${runUrl}`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                labels: ["incident", "${{ matrix.environment }}"],
+                body: `El smoke test programado no pudo validar /, /health.json o /version.json. Revisar el dashboard de CloudWatch y el log de este workflow: ${runUrl}`,
+              });
+            }
+
+      # Cierra la incidencia abierta automaticamente cuando el ambiente
+      # vuelve a responder -sin esto, una intermitencia transitoria deja el
+      # issue abierto para siempre aunque el servicio ya este sano.
+      - name: cerrar incidencia si el ambiente ya responde
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "incident,${{ matrix.environment }}",
+            });
+            for (const issue of existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: "El smoke test programado volvió a pasar. Cerrando automáticamente.",
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: "closed",
+              });
+            }
