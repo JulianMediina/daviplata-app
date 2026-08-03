@@ -77,16 +77,20 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             version="${{ inputs.version }}"
           else
-            # HEAD ya es la punta de la rama recien mergeada (ver checkout
-            # arriba: ref: steps.ctx.outputs.branch) -el tag alcanzable mas
-            # reciente desde ahi es la version que se promovio. No se usa
-            # github.event.pull_request.head.sha: el repo fuerza squash-merge,
-            # que descarta ese commit por completo (no queda como ancestro de
-            # la rama destino), asi que "--merged <ese sha>" siempre fallaba
-            # con "must point to a commit" para cualquier promocion real.
-            version=$(git tag --sort=-v:refname --merged HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+            # Sin "--merged": el repo fuerza squash-merge, que descarta el
+            # commit original del PR por completo -ni el sha del PR ni el
+            # tag que semantic-release creo en integracion quedan como
+            # ancestros reales de la rama destino tras el squash (se
+            # confirmo con un caso real: esta resolucion, con --merged HEAD,
+            # devolvio v0.1.9 en vez de la version recien publicada v0.3.0,
+            # porque el tag de v0.3.0 apunta a un commit de integracion que
+            # el squash-merge nunca hereda). En este proyecto siempre se
+            # promueve la version mas reciente publicada -nunca una anterior
+            # fuera de orden- asi que el tag mas alto de todo el repo, sin
+            # filtrar por ancestria, es la resolucion correcta.
+            version=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
             if [ -z "$version" ]; then
-              echo "No encontré ningún tag de versión alcanzable desde HEAD" >&2
+              echo "No encontré ningún tag de versión en el repositorio" >&2
               exit 1
             fi
           fi
